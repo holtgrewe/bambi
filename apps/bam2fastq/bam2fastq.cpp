@@ -34,6 +34,8 @@
 // Parallel conversion of BAM files (with an existing BAI index) to FASTQ.
 // ==========================================================================
 
+// TODO(holtgrew): One assumption here is that one thread can saturate the disk bandwidth when writing uncompressed file.
+
 #include <seqan/arg_parse.h>
 #include <seqan/basic.h>
 #include <seqan/bam_io.h>
@@ -330,24 +332,57 @@ int main(int argc, char const ** argv)
 
     std::cerr << " OK\n";
 
-    std::cerr << "Reordering discordant pair pile ..." << std::flush;
-    std::cerr << " OK\n";
-
     std::cerr << "Joining temporary FASTQ files ..." << std::flush;
+    // Open output files.
+    unsigned dotPos = length(options.outputPath);  // Rightmost dot position.
+    for (unsigned i = length(options.outputPath) - 1; i > 0; --i)
+        if (options.outputPath[i] == '.')
+        {
+            dotPos = i;
+            break;
+        }
+    seqan::CharString pePath = options.outputPath;
+    seqan::CharString singletonPath = options.outputPath;
+    insert(singletonPath, dotPos, ".singletons");
+    seqan::SequenceStream peOut(toCString(pePath), seqan::SequenceStream::WRITE);
+    if (!isGood(peOut))
+    {
+        std::cerr << "\nERROR: Could not open " << pePath << " for writing!\n";
+        return 1;
+    }
+    seqan::SequenceStream singletonOut(toCString(singletonPath), seqan::SequenceStream::WRITE);
+    if (!isGood(singletonOut))
+    {
+        std::cerr << "\nERROR: Could not open " << singletonPath << " for writing!\n";
+        return 1;
+    }
+    // Write out data.    
+    for (unsigned i = 0; i < length(threads); ++i)
+    {
+        if (threads[i].writeResult(peOut, singletonOut) != 0)
+            return 1;
+    }
     std::cerr << " OK\n";
 
     std::cerr << "\nDone converting BAM to FASTQ\n";
     // Sum up statistics on orphans.
     int numOrphans = 0, numSingletonOrphans = 0, numPairedOrphans = 0;
+    int numMapped = 0, numSingletonMapped = 0, numPairedMapped = 0;
     for (unsigned i = 0; i < length(threads); ++i)
     {
         numOrphans += threads[i]._stats.numOrphans;
         numSingletonOrphans += threads[i]._stats.numSingletonOrphans;
         numPairedOrphans += threads[i]._stats.numPairedOrphans;
+        numMapped += threads[i]._stats.numMapped;
+        numSingletonMapped += threads[i]._stats.numSingletonMapped;
+        numPairedMapped += threads[i]._stats.numPairedMapped;
     }
     std::cerr << "  Converted orphans:      " << numOrphans << "\n"
               << "              singletons: " << numSingletonOrphans << "\n"
-              << "              paired:     " << numPairedOrphans << "\n";
+              << "              paired:     " << numPairedOrphans << "\n"
+              << "            mapped reads: " << numMapped << "\n"
+              << "              singletons: " << numSingletonMapped << "\n"
+              << "              paired:     " << numPairedMapped << "\n";
 
     return 0;
 }

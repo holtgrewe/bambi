@@ -39,6 +39,9 @@
 
 #include <memory>
 
+#include <seqan/sequence.h>
+#include <seqan/store.h>  // For NameStoreCache.
+
 #include "job_queue.h"
 #include "bam_scanner_cache.h"
 
@@ -78,18 +81,37 @@ struct ConversionStats
     int numOrphans;
     int numSingletonOrphans;
     int numPairedOrphans;
+    int numMapped;
+    int numSingletonMapped;
+    int numPairedMapped;
 
-    ConversionStats() : numOrphans(0), numSingletonOrphans(0), numPairedOrphans(0)
+    ConversionStats() :
+            numOrphans(0), numSingletonOrphans(0), numPairedOrphans(0), numMapped(0), numSingletonMapped(0),
+            numPairedMapped(0)
     {}
 
     void countSingletonOrphan(int num = 1)
     {
+        numOrphans += num;
         numSingletonOrphans += num;
     }
 
     void countPairedOrphan(int num = 1)
     {
+        numOrphans += num;
         numPairedOrphans += num;
+    }
+
+    void countSingletonMapped(int num = 1)
+    {
+        numMapped += num;
+        numSingletonMapped += num;
+    }
+
+    void countPairedMapped(int num = 1)
+    {
+        numMapped += num;
+        numPairedMapped += num;
     }
 };
 
@@ -143,7 +165,8 @@ public:
     // The left-mapping mate cache data structure for BAM scanning.
     BamScannerCache scannerCache;
 
-    ConverterThread() : _state(START), _threadId(-1), _queue(), _dotCounter(0), _dot(false)
+    ConverterThread() :
+            _state(START), _threadId(-1), _queue(), _dotCounter(0), _dot(false)
     {}
 
     ConverterThread(int threadId, ConversionOptions const & options, JobQueue & queue) :
@@ -158,10 +181,16 @@ public:
     // Convert mapped files from the given job and append to the sequence streams.
     void convertMapped(ConverterJob const & job);
 
+    // Write resulting pairs interleaved to the given SequenceStream opened for output.
+    int writeResult(seqan::SequenceStream & peOut, seqan::SequenceStream & singletonOut);
+
     // Begin first step, opening input and output files.
     //
     // Return status code for indicating success/failure.
     int _startFirstStep();
+
+    // Begin second step, re-opening output files for reading.
+    int _startSecondStep();
 
     // Update state for dot printing.
     void _updateDot()
@@ -231,7 +260,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
     // Jump to the first record processed on the tile.  Return from function if a record is found that is right of the
     // tile and none on the tile.  A record to be processed on the tile is part of a pair that is completely on the tile
     // or that spans the tile and the one before.
-    jumpToPos(bamStream, job.rId, job.beginPos - mtl, baiIndex);
+    jumpToPos(bamStream, job.rId, std::max(job.beginPos - mtl, 0), baiIndex);
     if (atEnd(bamStream))
         return;  // Done, no error.
     while (!atEnd(bamStream))
@@ -251,8 +280,14 @@ void ConverterThread::convertMapped(ConverterJob const & job)
         if (record.pos >= job.beginPos && record.pos < job.endPos &&
             record.pNext >= job.beginPos && record.pNext < job.endPos)
             break;
-        // Stop if the pair spans the tile to the left.
-        if (record.pos < job.beginPos && record.pNext >= job.beginPos)
+        // Stop if the pair spans the tile to the left and does not have a too long insert size.
+        if (record.pos < job.beginPos && record.pNext >= job.beginPos &&
+            abs(record.pos - record.pNext) <= _options.maxTemplateLength)
+            break;
+        // Stop if the read is placed on this tile and the pair needs special handling below because of too long
+        // template length.
+        if (record.pos >= job.beginPos &&
+            abs(record.pos - record.pNext) > _options.maxTemplateLength)
             break;
 
         // Otherwise, we have to look at the next.
@@ -288,6 +323,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                     std::cerr << " => singleton stream\n";
                 }
             }
+            _stats.countSingletonMapped();
             if (writeRecord(singletonStream, record.qName, seq, record.qual) != 0)
                 return;  // TODO(holtgrew): Indicate failure.
         }
@@ -303,6 +339,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                         std::cerr << " => left pile stream\n";
                     }
                 }
+                _stats.countPairedMapped();
                 if (writeRecord(leftPileStream, record.qName, seq, record.qual) != 0)
                     return;  // TODO(holtgrew): Indicate failure.
             }
@@ -316,6 +353,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                         std::cerr << " => right pile stream\n";
                     }
                 }
+                _stats.countPairedMapped();
                 if (writeRecord(rightPileStream, record.qName, seq, record.qual) != 0)
                     return;  // TODO(holtgrew): Indicate failure.
             }
@@ -325,7 +363,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
     // Iterate over the BAM stream until we are right of the tile.
     while (!atEnd(bamStream))
     {
-        if (record.pos >= job.endPos)
+        if (record.pos >= job.endPos || record.rId != job.rId)
             break;  // Break out if not on this tile.
 
         bool skip = false;
@@ -335,6 +373,9 @@ void ConverterThread::convertMapped(ConverterJob const & job)
             skip = true;  // Skip if whole pair left of tile.
         if (record.pNext >= job.endPos)
             skip = true;  // Skip if pair hangs over tile to the right.
+        if (record.pos >= job.beginPos &&
+            abs(record.pos - record.pNext) > _options.maxTemplateLength)
+            skip = false;  // Do NOT skip if needs special treatment.
         if (skip)
         {
             // Skip secondary mappings.
@@ -345,7 +386,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
 
         if (FD)
         {
-            if (record.qName == "chr17_42877913_42878112_1:0:0_2:0:0_dd247")
+            if (record.qName == "chr17_3060049_3060217_0:0:0_1:0:0_2ffad")
             {
                 write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
                 std::cerr << " => BEING PROCESSED\n";
@@ -371,6 +412,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                     std::cerr << " => singleton stream\n";
                 }
             }
+            _stats.countSingletonMapped();
             if (writeRecord(singletonStream, record.qName, seq, record.qual) != 0)
                 return;  // TODO(holtgrew): Indicate failure.
             // Read next record and go to beginning of loop.
@@ -393,6 +435,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                         std::cerr << " => left pile stream\n";
                     }
                 }
+                _stats.countPairedMapped();
                 if (writeRecord(leftPileStream, record.qName, seq, record.qual) != 0)
                     return;  // TODO(holtgrew): Indicate failure.
             }
@@ -406,6 +449,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                         std::cerr << " => right pile stream\n";
                     }
                 }
+                _stats.countPairedMapped();
                 if (writeRecord(rightPileStream, record.qName, seq, record.qual) != 0)
                     return;  // TODO(holtgrew): Indicate failure.
             }
@@ -466,6 +510,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
             }
 
             // Write out sequences into the result stream.
+            _stats.countPairedMapped(2);
             if (hasFlagFirst(record))
             {
                 if (DEBUG)
@@ -650,6 +695,113 @@ int ConverterThread::_startFirstStep()
         return 1;
 
     _state = FIRST_STEP;
+
+    return 0;
+}
+
+// ----------------------------------------------------------------------------
+// Function ConverterThread::_startSecondStep()
+// ----------------------------------------------------------------------------
+
+int ConverterThread::_startSecondStep()
+{
+    if (_state != FIRST_STEP)
+        return 1;  // Invalid state.
+
+    // Re-open temporary files for reading.
+    _matesSeqStream.reset(new seqan::SequenceStream());
+    open(*_matesSeqStream, toCString(_matesFastqPath));
+    if (!isGood(*_matesSeqStream))
+        return 1;
+
+    _singletonSeqStream.reset(new seqan::SequenceStream());
+    open(*_singletonSeqStream, toCString(_singletonFastqPath));
+    if (!isGood(*_singletonSeqStream))
+        return 1;
+
+    _leftPileSeqStream.reset(new seqan::SequenceStream());
+    open(*_leftPileSeqStream, toCString(_leftPileFastqPath));
+    if (!isGood(*_leftPileSeqStream))
+        return 1;
+
+    _rightPileSeqStream.reset(new seqan::SequenceStream());
+    open(*_rightPileSeqStream, toCString(_rightPileFastqPath));
+    if (!isGood(*_rightPileSeqStream))
+        return 1;
+
+    _state = SECOND_STEP;
+
+    return 0;
+}
+
+// ----------------------------------------------------------------------------
+// Function ConverterThread::writeResult()
+// ----------------------------------------------------------------------------
+
+int ConverterThread::writeResult(seqan::SequenceStream & matesOut, seqan::SequenceStream & singletonOut)
+{
+    // Start second step if necessary.
+    if (_state != SECOND_STEP && _startSecondStep() != 0)
+        return 1;
+
+    seqan::SequenceStream & matesStream = *_matesSeqStream;
+    seqan::SequenceStream & singletonStream = *_singletonSeqStream;
+    seqan::SequenceStream & leftPileStream = *_leftPileSeqStream;
+    seqan::SequenceStream & rightPileStream = *_rightPileSeqStream;
+
+    // Buffers used below.
+    seqan::CharString id, seq, qual;
+    
+    // Write out all singletons.
+    while (!atEnd(singletonStream))
+    {
+        if (readRecord(id, seq, qual, singletonStream) != 0)
+            return 1;
+        if (writeRecord(singletonOut, id, seq, qual) != 0)
+            return 1;
+    }
+
+    // Write out all PE reads.
+    while (!atEnd(matesStream))
+    {
+        if (readRecord(id, seq, qual, matesStream) != 0)
+            return 1;
+        if (writeRecord(matesOut, id, seq, qual) != 0)
+            return 1;
+    }
+
+    // Read in all left pile sequences.
+    // typedef seqan::StringSet<seqan::CharString, seqan::Owner<seqan::ConcatDirect<> > > TCharStringSet;
+    typedef seqan::StringSet<seqan::CharString> TCharStringSet;
+    TCharStringSet ids, seqs, quals;
+    while (!atEnd(leftPileStream))
+    {
+        if (readRecord(id, seq, qual, leftPileStream) != 0)
+            return 1;
+        appendValue(ids, id);
+        appendValue(seqs, seq);
+        appendValue(quals, qual);
+    }
+
+    // Build cache over the pile sequence names.
+    seqan::NameStoreCache<TCharStringSet> idsCache(ids);
+
+    // Read in all right pile sequences.
+    while (!atEnd(rightPileStream))
+    {
+        if (readRecord(id, seq, qual, rightPileStream) != 0)
+            return 1;
+        unsigned idx = 0;
+        if (!getIdByName(ids, id, idx, idsCache))
+        {
+            std::cerr << "ERROR: Could not find read " << id << " in left pile.\n";
+            return 1;
+        }
+        if (writeRecord(matesOut, ids[idx], seqs[idx], quals[idx]) != 0)
+            return 1;
+        if (writeRecord(matesOut, id, seq, qual) != 0)
+            return 1;
+    }
 
     return 0;
 }
