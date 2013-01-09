@@ -303,21 +303,27 @@ int main(int argc, char const ** argv)
     SEQAN_OMP_PRAGMA(parallel num_threads(options.numThreads))
     {
         // Convert options by master.
-        #pragma omp master
+        SEQAN_OMP_PRAGMA(master)
         {
-            fprintf(stderr, "master thread %d\n", omp_get_thread_num());
             threads[omp_get_thread_num()].convertOrphans();
+            SEQAN_OMP_PRAGMA(critical (io))
+            {
+                std::cerr << "[orphans done]";
+            }
         }
-
-        fprintf(stderr, "worker thread %d\n", omp_get_thread_num());
 
         bool stop = false;
         while (!stop)
         {
             ConverterJob job;
-            if (stop = !jobQueue.pop(job))
+            if (!(stop = !jobQueue.pop(job)))
             {
                 threads[omp_get_thread_num()].convertMapped(job);
+            }
+            SEQAN_OMP_PRAGMA(critical (io))
+            {
+                if (threads[omp_get_thread_num()].dot())
+                    std::cerr << ".";
             }
         }
     }
@@ -325,15 +331,23 @@ int main(int argc, char const ** argv)
     std::cerr << " OK\n";
 
     std::cerr << "Reordering discordant pair pile ..." << std::flush;
-    std::cerr << "\n";
+    std::cerr << " OK\n";
 
     std::cerr << "Joining temporary FASTQ files ..." << std::flush;
     std::cerr << " OK\n";
 
     std::cerr << "\nDone converting BAM to FASTQ\n";
-    std::cerr << "  Converted " << 0 << " singletons\n"
-              << "            " << 0 << " pairs within max template length\n"
-              << "            " << 0 << " pairs with a larger template length\n";
+    // Sum up statistics on orphans.
+    int numOrphans = 0, numSingletonOrphans = 0, numPairedOrphans = 0;
+    for (unsigned i = 0; i < length(threads); ++i)
+    {
+        numOrphans += threads[i]._stats.numOrphans;
+        numSingletonOrphans += threads[i]._stats.numSingletonOrphans;
+        numPairedOrphans += threads[i]._stats.numPairedOrphans;
+    }
+    std::cerr << "  Converted orphans:      " << numOrphans << "\n"
+              << "              singletons: " << numSingletonOrphans << "\n"
+              << "              paired:     " << numPairedOrphans << "\n";
 
     return 0;
 }
