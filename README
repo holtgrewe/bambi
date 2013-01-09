@@ -1,0 +1,16 @@
+BAMBI - Tools for processing BAM files
+======================================
+
+This is a small collection of tools for processing BAM files.
+
+The project is a SeqAn sandbox.  See the SeqAn Getting Started tutorial to see
+for details on how you can build it:
+
+    http://trac.seqan.de/wiki/Tutorial/GettingStarted
+
+The short version is:
+
+ * Check out SeqAn.
+ * Check out this repository into sandbox/bambi.
+ * Call CMake for SeqAn.
+ * Build the apps in this sandbox.
