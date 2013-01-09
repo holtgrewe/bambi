@@ -38,6 +38,10 @@
 #ifndef SANDBOX_BAMBI_APPS_BAM2FASTQ_BAM_SCANNER_CACHE_H_
 #define SANDBOX_BAMBI_APPS_BAM2FASTQ_BAM_SCANNER_CACHE_H_
 
+#include <set>
+
+#include <seqan/bam_io.h>
+
 // ============================================================================
 // Forwards
 // ============================================================================
@@ -46,12 +50,120 @@
 // Tags, Classes, Enums
 // ============================================================================
 
+// ----------------------------------------------------------------------------
+// Class BamScannerCache
+// ----------------------------------------------------------------------------
+
+// Data structure for storing first-see mates.
+
+class BamScannerCache
+{
+public:
+    // The Key is a pair of (genomic pos, name) where genomic pos is a pair of (rId, pos).
+    typedef std::pair<std::pair<int, int>, std::string> TKey;
+    // A mapping from the key type to the BamAlignmentRecord at this position.
+    typedef std::map<TKey, seqan::BamAlignmentRecord> TMap;
+
+    TMap _map;
+
+    BamScannerCache()
+    {}
+};
+
 // ============================================================================
 // Metafunctions
 // ============================================================================
 
+// ----------------------------------------------------------------------------
+// Metafunction Iterator
+// ----------------------------------------------------------------------------
+
+// Returns iterator for the cache.
+
+namespace seqan {
+
+template <>
+struct Iterator<BamScannerCache>
+{
+    typedef typename BamScannerCache::TMap::const_iterator Type;
+};
+
+template <>
+struct Iterator<BamScannerCache const>
+{
+    typedef BamScannerCache const TCache_;
+    typedef typename TCache_::TMap::const_iterator Type;
+};
+
+}  // namespace seqan
+
 // ============================================================================
 // Functions
 // ============================================================================
+
+void dumpCache(BamScannerCache const & cache)
+{
+    for (auto it = cache._map.begin(); it != cache._map.end(); ++it)
+        std::cerr << it->first.first.first << "\t" << it->first.first.second << "\t" << it->first.second << "\n";
+}
+
+// ----------------------------------------------------------------------------
+// Function insertRecord()
+// ----------------------------------------------------------------------------
+
+void insertRecord(BamScannerCache & cache, seqan::BamAlignmentRecord const & record)
+{
+    BamScannerCache::TKey key(std::make_pair(record.rId, record.pos), toCString(record.qName));
+    cache._map[key] = record;
+}
+
+// ----------------------------------------------------------------------------
+// Function findMate()
+// ----------------------------------------------------------------------------
+
+seqan::Iterator<BamScannerCache>::Type
+findMate(BamScannerCache & cache, seqan::BamAlignmentRecord const & record)
+{
+    BamScannerCache::TKey key(std::make_pair(record.rNextId, record.pNext), toCString(record.qName));
+    return cache._map.find(key);
+}
+
+// ----------------------------------------------------------------------------
+// Function end()
+// ----------------------------------------------------------------------------
+
+seqan::Iterator<BamScannerCache>::Type
+end(BamScannerCache & cache, seqan::Standard const & /*tag*/)
+{
+    return cache._map.end();
+}
+
+// ----------------------------------------------------------------------------
+// Function erase()
+// ----------------------------------------------------------------------------
+
+void erase(BamScannerCache & cache, seqan::Iterator<BamScannerCache const>::Type it)
+{
+    cache._map.erase(it);
+}
+
+// ----------------------------------------------------------------------------
+// Function empty()
+// ----------------------------------------------------------------------------
+
+bool empty(BamScannerCache const & cache)
+{
+    return cache._map.empty();
+}
+
+// ----------------------------------------------------------------------------
+// Function containsMate()
+// ----------------------------------------------------------------------------
+
+bool containsMate(BamScannerCache const & cache, seqan::BamAlignmentRecord const & record)
+{
+    BamScannerCache::TKey key(std::make_pair(record.rNextId, record.pNext), toCString(record.qName));
+    return (bool)cache._map.count(key);
+}
 
 #endif  // #ifndef SANDBOX_BAMBI_APPS_BAM2FASTQ_BAM_SCANNER_CACHE_H_

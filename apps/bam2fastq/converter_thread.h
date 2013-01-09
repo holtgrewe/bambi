@@ -40,6 +40,7 @@
 #include <memory>
 
 #include "job_queue.h"
+#include "bam_scanner_cache.h"
 
 // ============================================================================
 // Forwards
@@ -139,6 +140,9 @@ public:
     // Index on BAM file.
     std::shared_ptr<seqan::BamIndex<seqan::Bai> > _baiIndex;
 
+    // The left-mapping mate cache data structure for BAM scanning.
+    BamScannerCache scannerCache;
+
     ConverterThread() : _state(START), _threadId(-1), _queue(), _dotCounter(0), _dot(false)
     {}
 
@@ -195,6 +199,324 @@ void ConverterThread::convertMapped(ConverterJob const & job)
 {
     if (_state == START)
         _startFirstStep();
+
+    // Get shortcuts to streams and indices, also reduces overhead through dereferencing the shared_ptr.
+    seqan::BamStream & bamStream = *_bamStream;
+    seqan::BamIndex<seqan::Bai> & baiIndex = *_baiIndex;
+    seqan::SequenceStream & matesStream = *_matesSeqStream;
+    seqan::SequenceStream & singletonStream = *_singletonSeqStream;
+    seqan::SequenceStream & leftPileStream = *_leftPileSeqStream;
+    seqan::SequenceStream & rightPileStream = *_rightPileSeqStream;
+
+    seqan::BamAlignmentRecord record;
+    seqan::Dna5String seq, otherSeq;
+    record.rId = -1;
+
+    int mtl = _options.maxTemplateLength;
+
+    bool DEBUG = false;
+    bool FD = false;
+
+    if (FD || DEBUG)
+    {
+        SEQAN_OMP_PRAGMA(critical (io))
+        {
+            std::cerr << "--------------------- NEW TILE ---------------------\n"
+                      << "  begin pos - mtl\t" << job.beginPos - mtl << "\n"
+                      << "  begin pos      \t" << job.beginPos << "\n"
+                      << "  end pos        \t" << job.endPos << "\n";
+        }
+    }
+
+    // Jump to the first record processed on the tile.  Return from function if a record is found that is right of the
+    // tile and none on the tile.  A record to be processed on the tile is part of a pair that is completely on the tile
+    // or that spans the tile and the one before.
+    jumpToPos(bamStream, job.rId, job.beginPos - mtl, baiIndex);
+    if (atEnd(bamStream))
+        return;  // Done, no error.
+    while (!atEnd(bamStream))
+    {
+        if (readRecord(record, bamStream) != 0)
+            return;  // TODO(holtgrew): Indicate error.
+        if (record.rId > job.rId || (record.rId == job.rId && record.pos >= job.endPos))
+            return;  // Done, no record in tile in BAM file.
+
+        if (hasFlagSecondary(record))
+            continue;  // Skip, we only want the primary mapping location.
+        if (record.rId < job.rId)
+            continue;  // Skip if on contig left of the current one.
+        // If we reach here then the record is on the same contig.
+
+        // Stop if the whole pair is on the tile.
+        if (record.pos >= job.beginPos && record.pos < job.endPos &&
+            record.pNext >= job.beginPos && record.pNext < job.endPos)
+            break;
+        // Stop if the pair spans the tile to the left.
+        if (record.pos < job.beginPos && record.pNext >= job.beginPos)
+            break;
+
+        // Otherwise, we have to look at the next.
+    }
+    if (FD)
+    {
+        SEQAN_OMP_PRAGMA(critical (io))
+        {
+            std::cerr << "FIRST ON TILE IS\n";
+            write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+        }
+    }
+    // The first BAM record on the tile is now stored in record or it is the first after.
+
+    // If this was already the last record, then put it onto the pile or into the singleton stream.
+    if (atEnd(bamStream))
+    {
+        // Restore original sequence and quality strings.
+        seq = record.seq;
+        if (hasFlagRC(record))
+        {
+            reverseComplement(seq);
+            reverse(record.qual);
+        }
+
+        if (!hasFlagMultiple(record))
+        {
+            if (DEBUG)
+            {
+                SEQAN_OMP_PRAGMA(critical (io))
+                {
+                    write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                    std::cerr << " => singleton stream\n";
+                }
+            }
+            if (writeRecord(singletonStream, record.qName, seq, record.qual) != 0)
+                return;  // TODO(holtgrew): Indicate failure.
+        }
+        else
+        {
+            if (hasFlagFirst(record))
+            {
+                if (DEBUG)
+                {
+                    SEQAN_OMP_PRAGMA(critical (io))
+                    {
+                        write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                        std::cerr << " => left pile stream\n";
+                    }
+                }
+                if (writeRecord(leftPileStream, record.qName, seq, record.qual) != 0)
+                    return;  // TODO(holtgrew): Indicate failure.
+            }
+            else
+            {
+                if (DEBUG)
+                {
+                    SEQAN_OMP_PRAGMA(critical (io))
+                    {
+                        write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                        std::cerr << " => right pile stream\n";
+                    }
+                }
+                if (writeRecord(rightPileStream, record.qName, seq, record.qual) != 0)
+                    return;  // TODO(holtgrew): Indicate failure.
+            }
+        }
+    }
+
+    // Iterate over the BAM stream until we are right of the tile.
+    while (!atEnd(bamStream))
+    {
+        if (record.pos >= job.endPos)
+            break;  // Break out if not on this tile.
+
+        bool skip = false;
+        if (hasFlagSecondary(record))
+            skip = true;  // Skip secondary mappings.
+        if (record.pos < job.beginPos && record.pNext < job.beginPos)
+            skip = true;  // Skip if whole pair left of tile.
+        if (record.pNext >= job.endPos)
+            skip = true;  // Skip if pair hangs over tile to the right.
+        if (skip)
+        {
+            // Skip secondary mappings.
+            if (readRecord(record, bamStream) != 0)
+                return;  // TODO(holtgrew): Indicate error.
+            continue;
+        }
+
+        if (FD)
+        {
+            if (record.qName == "chr17_42877913_42878112_1:0:0_2:0:0_dd247")
+            {
+                write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                std::cerr << " => BEING PROCESSED\n";
+            }
+        }
+
+        // Restore original sequence and quality strings.
+        seq = record.seq;
+        if (hasFlagRC(record))
+        {
+            reverseComplement(seq);
+            reverse(record.qual);
+        }
+
+        // Handle the case of singleton records first.
+        if (!hasFlagMultiple(record))
+        {
+            if (DEBUG)
+            {
+                SEQAN_OMP_PRAGMA(critical (io))
+                {
+                    write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                    std::cerr << " => singleton stream\n";
+                }
+            }
+            if (writeRecord(singletonStream, record.qName, seq, record.qual) != 0)
+                return;  // TODO(holtgrew): Indicate failure.
+            // Read next record and go to beginning of loop.
+            if (readRecord(record, bamStream) != 0)
+                return;  // TODO(holtgrew): Indicate error.
+            continue;
+        }
+
+        // Handle the case where record is handled through the piles.  This happens if the record does not map within
+        // the maximum template length or on different contigs.
+        if (record.rId != record.rNextId || abs(record.pos - record.pNext) > _options.maxTemplateLength)
+        {
+            if (hasFlagFirst(record))
+            {
+                if (DEBUG)
+                {
+                    SEQAN_OMP_PRAGMA(critical (io))
+                    {
+                        write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                        std::cerr << " => left pile stream\n";
+                    }
+                }
+                if (writeRecord(leftPileStream, record.qName, seq, record.qual) != 0)
+                    return;  // TODO(holtgrew): Indicate failure.
+            }
+            else
+            {
+                if (DEBUG)
+                {
+                    SEQAN_OMP_PRAGMA(critical (io))
+                    {
+                        write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                        std::cerr << " => right pile stream\n";
+                    }
+                }
+                if (writeRecord(rightPileStream, record.qName, seq, record.qual) != 0)
+                    return;  // TODO(holtgrew): Indicate failure.
+            }
+            // Read next record and go to beginning of loop.
+            if (readRecord(record, bamStream) != 0)
+                return;  // TODO(holtgrew): Indicate error.
+            continue;
+        }
+
+        // If we reach here then the record is a mate in a pair that has a sufficiently short template length and both
+        // mates map on the same contig.  If this is the left mapping mate then we simply insert record into the
+        // BamScannerCache.  If this is the right mapping mate then we have to be able to find the left mapping mate in
+        // the BamScannerCache.  In the case of mapping a the same position, we put record into the cache if there is no
+        // such record in the cache already and we must be the first.
+        SEQAN_ASSERT_EQ(record.rId, record.rNextId);
+        if (record.pos < record.pNext || (record.pos == record.pNext && !containsMate(scannerCache, record)))
+        {
+            if (DEBUG)
+            {
+                SEQAN_OMP_PRAGMA(critical (io))
+                {
+                    write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                    std::cerr << " => into cache\n";
+                }
+            }
+            insertRecord(scannerCache, record);
+            // Read next record and go to beginning of loop.
+            if (readRecord(record, bamStream) != 0)
+                return;  // TODO(holtgrew): Indicate error.
+            continue;
+        }
+        else
+        {
+            typedef seqan::Iterator<BamScannerCache, seqan::Standard>::Type TIter;
+            TIter otherIt = findMate(scannerCache, record);
+            if (otherIt == end(scannerCache, seqan::Standard()))
+            {
+                if (DEBUG)
+                {
+                    SEQAN_OMP_PRAGMA(critical (io))
+                    {
+                        std::cerr << "MATE COULD NOT BE FOUND FOR:\n";
+                        write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                        std::cerr << "job.beginPos = " << job.beginPos << "\n"
+                                  << "job.beginPos - mtl = " << job.beginPos - mtl << "\n"
+                                  << "job.endPos = " << job.endPos << "\n";
+                    }
+                }
+                SEQAN_FAIL("Could not find mate for record but it must be there!");
+            }
+            seqan::BamAlignmentRecord const & otherRecord = otherIt->second;
+            // Restore original sequence for the other record.
+            otherSeq = otherRecord.seq;
+            if (hasFlagRC(otherRecord))
+            {
+                reverseComplement(otherSeq);
+                reverse(otherRecord.qual);
+            }
+
+            // Write out sequences into the result stream.
+            if (hasFlagFirst(record))
+            {
+                if (DEBUG)
+                {
+                    SEQAN_OMP_PRAGMA(critical (io))
+                    {
+                        write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                        std::cerr << " => mates stream (as left)\n";
+                        write2(std::cerr, otherRecord, bamStream.bamIOContext, seqan::Sam());
+                        std::cerr << " => mates stream (as right)\n";
+                    }
+                }
+                if (writeRecord(matesStream, record.qName, seq, record.qual) != 0)
+                    return;  // TODO(holtgrew): Indicate failure!
+                if (writeRecord(matesStream, otherRecord.qName, otherSeq, otherRecord.qual) != 0)
+                    return;  // TODO(holtgrew): Indicate failure!
+            }
+            else
+            {
+                if (DEBUG)
+                {
+                    SEQAN_OMP_PRAGMA(critical (io))
+                    {
+                        write2(std::cerr, otherRecord, bamStream.bamIOContext, seqan::Sam());
+                        std::cerr << " => mates stream (as left)\n";
+                        write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                        std::cerr << " => mates stream (as right)\n";
+                    }
+                }
+                if (writeRecord(matesStream, otherRecord.qName, otherSeq, otherRecord.qual) != 0)
+                    return;  // TODO(holtgrew): Indicate failure!
+                if (writeRecord(matesStream, record.qName, seq, record.qual) != 0)
+                    return;  // TODO(holtgrew): Indicate failure!
+            }
+            
+            // Remove other entry from cache again.
+            unsigned oldSize = scannerCache._map.size();
+            erase(scannerCache, otherIt);
+            SEQAN_CHECK(scannerCache._map.size() + 1 == oldSize, "Must decrease size!");
+            SEQAN_CHECK(!containsMate(scannerCache, record), "Must not be there any more!");
+        }
+
+        // Read next record.
+        if (readRecord(record, bamStream) != 0)
+            return;  // TODO(holtgrew): Indicate error.
+    }
+
+    if (!empty(scannerCache))
+        dumpCache(scannerCache);
+    SEQAN_CHECK(empty(scannerCache), "Invalid pairing, probably some POS/PNEXT, RID/RNEXT field is wrong!");
+
     _updateDot();
 }
 
@@ -216,16 +538,21 @@ void ConverterThread::convertOrphans()
     if (!jumpToOrphans(bamStream, baiIndex))
         return;  // TODO(holtgrew): Indicate failure.
 
+    // Used for storing the sequence below.  Declare here to allow reusing.
     seqan::Dna5String leftSeq, rightSeq;
-
     seqan::BamAlignmentRecord leftRecord, rightRecord;
+
+    // Scan over orphans in BAM file.
     while (!atEnd(bamStream))
     {
         if (readRecord(leftRecord, bamStream) != 0)
             return; // TODO(holtgrew): Indicate failure.
         leftSeq = leftRecord.seq;
         if (hasFlagRC(leftRecord))
+        {
             reverseComplement(leftSeq);
+            reverse(leftRecord.qual);
+        }
         SEQAN_ASSERT(hasFlagUnmapped(leftRecord));
 
         // Write out singletons immediately and continue.
@@ -242,7 +569,10 @@ void ConverterThread::convertOrphans()
             return;  // TODO(holtgrew): Indicate failure.
         rightSeq = rightRecord.seq;
         if (hasFlagRC(rightRecord))
+        {
             reverseComplement(rightSeq);
+            reverse(rightRecord.qual);
+        }
         SEQAN_ASSERT(hasFlagUnmapped(rightRecord));
 
         SEQAN_CHECK(leftRecord.qName == rightRecord.qName, "Adjacent orphan paired records must have the same QNAME!");
@@ -310,12 +640,12 @@ int ConverterThread::_startFirstStep()
         return 1;
 
     _leftPileSeqStream.reset(new seqan::SequenceStream());
-    open(*_leftPileSeqStream, toCString(_singletonFastqPath), seqan::SequenceStream::WRITE);
+    open(*_leftPileSeqStream, toCString(_leftPileFastqPath), seqan::SequenceStream::WRITE);
     if (!isGood(*_leftPileSeqStream))
         return 1;
 
     _rightPileSeqStream.reset(new seqan::SequenceStream());
-    open(*_rightPileSeqStream, toCString(_singletonFastqPath), seqan::SequenceStream::WRITE);
+    open(*_rightPileSeqStream, toCString(_rightPileFastqPath), seqan::SequenceStream::WRITE);
     if (!isGood(*_rightPileSeqStream))
         return 1;
 
