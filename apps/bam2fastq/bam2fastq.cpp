@@ -299,7 +299,7 @@ int main(int argc, char const ** argv)
     }
     std::cerr << " OK\n";
 
-    std::cerr << "Conversion ..." << std::flush;
+    std::cerr << "Conversion ... " << std::flush;
 
     // Fire up threads.  The master does the orphan conversion first and then grabs jobs as all other threads.
     SEQAN_OMP_PRAGMA(parallel num_threads(options.numThreads))
@@ -360,7 +360,65 @@ int main(int argc, char const ** argv)
     for (unsigned i = 0; i < length(threads); ++i)
     {
         if (threads[i].writeResult(peOut, singletonOut) != 0)
+        {
+            std::cerr << "\nERROR: Could not write result for thread " << i << "\n";
             return 1;
+        }
+    }
+    // Process piles.
+    //
+    // Read in all left pile sequences.
+    typedef seqan::StringSet<seqan::CharString> TCharStringSet;
+    TCharStringSet ids, seqs, quals;
+    for (unsigned i = 0; i < length(threads); ++i)
+    {
+        seqan::CharString id, seq, qual;
+        seqan::SequenceStream & leftPileStream = *threads[i]._leftPileSeqStream;
+        while (!atEnd(leftPileStream))
+        {
+            if (readRecord(id, seq, qual, leftPileStream) != 0)
+            {
+                std::cerr << "\nERROR: Could not write record from left pile of " << i << "\n";
+                return 1;
+            }
+            appendValue(ids, id);
+            appendValue(seqs, seq);
+            appendValue(quals, qual);
+        }
+    }
+
+    // Build cache over the pile sequence names.
+    seqan::NameStoreCache<TCharStringSet> idsCache(ids);
+
+    // Read in all right pile sequences.
+    for (unsigned i = 0; i < length(threads); ++i)
+    {
+        seqan::CharString id, seq, qual;
+        seqan::SequenceStream & rightPileStream = *threads[i]._rightPileSeqStream;
+        while (!atEnd(rightPileStream))
+        {
+            if (readRecord(id, seq, qual, rightPileStream) != 0)
+            {
+                std::cerr << "\nERROR: Could not write record from left pile of " << i << "\n";
+                return 1;
+            }
+            unsigned idx = 0;
+            if (!getIdByName(ids, id, idx, idsCache))
+            {
+                std::cerr << "ERROR: Could not find read " << id << " in left pile.\n";
+                return 1;
+            }
+            if (writeRecord(peOut, ids[idx], seqs[idx], quals[idx]) != 0)
+            {
+                std::cerr << "\nERROR: Could not write to PE output file\n";
+                return 1;
+            }
+            if (writeRecord(peOut, id, seq, qual) != 0)
+            {
+                std::cerr << "\nERROR: Could not write to PE output file\n";
+                return 1;
+            }
+        }
     }
     std::cerr << " OK\n";
 

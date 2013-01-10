@@ -173,7 +173,19 @@ public:
             _state(START), _threadId(threadId), _options(options), _queue(&queue), _dotCounter(0), _dot(false)
     {}
 
-    // TODO(holtgrew): Delete temporary files on destruction.
+    ~ConverterThread()
+    {
+        cleanup();
+    }
+
+    // Remove temporary files again.
+    void cleanup()
+    {
+        remove(toCString(_matesFastqPath));
+        remove(toCString(_singletonFastqPath));
+        remove(toCString(_leftPileFastqPath));
+        remove(toCString(_rightPileFastqPath));
+    }
 
     // Convert orphans from BAM file and append to the sequence streams.
     void convertOrphans();
@@ -664,13 +676,17 @@ int ConverterThread::_startFirstStep()
         return 1;
 
     // Generate temporary file name.
-    _matesFastqPath = SEQAN_TEMP_FILENAME();
+    SEQAN_OMP_PRAGMA(critical(temp_filename))
+    {
+        _leftPileFastqPath = SEQAN_TEMP_FILENAME();
+        _rightPileFastqPath = SEQAN_TEMP_FILENAME();
+        _matesFastqPath = SEQAN_TEMP_FILENAME();
+        _singletonFastqPath = SEQAN_TEMP_FILENAME();
+    }
+
     append(_matesFastqPath, "_m.fq");  // Mate Pairs
-    _singletonFastqPath = SEQAN_TEMP_FILENAME();
     append(_singletonFastqPath, "_s.fq");  // Singletons
-    _leftPileFastqPath = SEQAN_TEMP_FILENAME();
     append(_leftPileFastqPath, "_lp.fq");  // Left Pile
-    _rightPileFastqPath = SEQAN_TEMP_FILENAME();
     append(_rightPileFastqPath, "_rp.fq");  // Right Pile
 
     // Open temporary files.
@@ -742,12 +758,13 @@ int ConverterThread::writeResult(seqan::SequenceStream & matesOut, seqan::Sequen
 {
     // Start second step if necessary.
     if (_state != SECOND_STEP && _startSecondStep() != 0)
+    {
+        std::cerr << "ERROR: Could not start second step for thread " << omp_get_thread_num() << "\n";
         return 1;
+    }
 
     seqan::SequenceStream & matesStream = *_matesSeqStream;
     seqan::SequenceStream & singletonStream = *_singletonSeqStream;
-    seqan::SequenceStream & leftPileStream = *_leftPileSeqStream;
-    seqan::SequenceStream & rightPileStream = *_rightPileSeqStream;
 
     // Buffers used below.
     seqan::CharString id, seq, qual;
@@ -756,51 +773,30 @@ int ConverterThread::writeResult(seqan::SequenceStream & matesOut, seqan::Sequen
     while (!atEnd(singletonStream))
     {
         if (readRecord(id, seq, qual, singletonStream) != 0)
+        {
+            std::cerr << "ERROR: Could not load singleton from temporary file for thread " << omp_get_thread_num() << "\n";
             return 1;
+        }
         if (writeRecord(singletonOut, id, seq, qual) != 0)
+        {
+            std::cerr << "ERROR: Could not write singleton record for thread " << omp_get_thread_num() << "\n";
             return 1;
+        }
     }
 
     // Write out all PE reads.
     while (!atEnd(matesStream))
     {
         if (readRecord(id, seq, qual, matesStream) != 0)
-            return 1;
-        if (writeRecord(matesOut, id, seq, qual) != 0)
-            return 1;
-    }
-
-    // Read in all left pile sequences.
-    // typedef seqan::StringSet<seqan::CharString, seqan::Owner<seqan::ConcatDirect<> > > TCharStringSet;
-    typedef seqan::StringSet<seqan::CharString> TCharStringSet;
-    TCharStringSet ids, seqs, quals;
-    while (!atEnd(leftPileStream))
-    {
-        if (readRecord(id, seq, qual, leftPileStream) != 0)
-            return 1;
-        appendValue(ids, id);
-        appendValue(seqs, seq);
-        appendValue(quals, qual);
-    }
-
-    // Build cache over the pile sequence names.
-    seqan::NameStoreCache<TCharStringSet> idsCache(ids);
-
-    // Read in all right pile sequences.
-    while (!atEnd(rightPileStream))
-    {
-        if (readRecord(id, seq, qual, rightPileStream) != 0)
-            return 1;
-        unsigned idx = 0;
-        if (!getIdByName(ids, id, idx, idsCache))
         {
-            std::cerr << "ERROR: Could not find read " << id << " in left pile.\n";
+            std::cerr << "ERROR: Could not load paired from temporary file for thread " << omp_get_thread_num() << "\n";
             return 1;
         }
-        if (writeRecord(matesOut, ids[idx], seqs[idx], quals[idx]) != 0)
-            return 1;
         if (writeRecord(matesOut, id, seq, qual) != 0)
+        {
+            std::cerr << "ERROR: Could not write paired record for thread " << omp_get_thread_num() << "\n";
             return 1;
+        }
     }
 
     return 0;
