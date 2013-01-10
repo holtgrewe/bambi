@@ -214,6 +214,8 @@ parseCommandLine(Options & options, int argc, char const ** argv)
 
 int main(int argc, char const ** argv)
 {
+    double startTime = 0, overallStartTime = sysTime();
+
     // Parse the command line.
     seqan::ArgumentParser parser;
     Options options;
@@ -299,6 +301,7 @@ int main(int argc, char const ** argv)
     }
     std::cerr << " OK\n";
 
+    startTime = sysTime();
     std::cerr << "Conversion ... " << std::flush;
 
     // Fire up threads.  The master does the orphan conversion first and then grabs jobs as all other threads.
@@ -331,7 +334,9 @@ int main(int argc, char const ** argv)
     }
 
     std::cerr << " OK\n";
+    std::cerr << "  Took " << (sysTime() - startTime) << " s\n";
 
+    startTime = sysTime();
     std::cerr << "Joining temporary FASTQ files ..." << std::flush;
     // Open output files.
     unsigned dotPos = length(options.outputPath);  // Rightmost dot position.
@@ -421,6 +426,7 @@ int main(int argc, char const ** argv)
         }
     }
     std::cerr << " OK\n";
+    std::cerr << "  Took " << (sysTime() - startTime) << " s\n";
 
     std::cerr << "\nDone converting BAM to FASTQ\n";
     // Sum up statistics on orphans.
@@ -440,7 +446,9 @@ int main(int argc, char const ** argv)
               << "              paired:     " << numPairedOrphans << "\n"
               << "            mapped reads: " << numMapped << "\n"
               << "              singletons: " << numSingletonMapped << "\n"
-              << "              paired:     " << numPairedMapped << "\n";
+              << "              paired:     " << numPairedMapped << "\n"
+              << "\n"
+              << "Took " << sysTime() - overallStartTime << " s\n";
 
     return 0;
 }
