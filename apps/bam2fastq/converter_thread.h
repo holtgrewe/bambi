@@ -657,6 +657,44 @@ void ConverterThread::convertOrphans()
 // Function ConverterThread::_startFirstStep()
 // ----------------------------------------------------------------------------
 
+int getTempFilename(seqan::CharString & result)
+{
+    // Construct the pattern for the temporary file.
+    //
+    // First, try to get the temporary directory from the environment
+    // variables TMPDIR, TMP.
+    seqan::CharString tmpDir;
+
+    if ((getuid() == geteuid()) && (getgid() == getegid()))
+    {
+        char * res = NULL;
+        if ((res = getenv("TMPDIR")) != NULL)
+            tmpDir = res;
+        else if ((res = getenv("TMP")) != NULL)
+            tmpDir = res;
+    }
+
+    // If this does not work, fall back to "/tmp".
+    if (empty(tmpDir))
+        tmpDir = "/tmp";
+
+    // At this point, we have a temporary directory.  Now, we add the
+    // file name template to get the full path template.
+    append(tmpDir, "/SQNXXXXXX");
+
+    // Open temporary file and unlink it immediately afterwards so the
+    // memory is released when the program exits.
+    int handle = 0;
+    if ((handle = ::mkstemp(toCString(tmpDir))) == -1)
+        return 1;
+    close(handle);
+    unlink(toCString(tmpDir));
+
+    result = tmpDir;
+
+    return 0;
+}
+
 int ConverterThread::_startFirstStep()
 {
     if (_state != START)
@@ -676,13 +714,20 @@ int ConverterThread::_startFirstStep()
         return 1;
 
     // Generate temporary file name.
+    int status = 0;
     SEQAN_OMP_PRAGMA(critical(temp_filename))
     {
-        _leftPileFastqPath = tmpnam(NULL);
-        _rightPileFastqPath = tmpnam(NULL);
-        _matesFastqPath = tmpnam(NULL);
-        _singletonFastqPath = tmpnam(NULL);
+        if (getTempFilename(_leftPileFastqPath) != 0)
+            status = 1;
+        if (getTempFilename(_rightPileFastqPath) != 0)
+            status = 1;
+        if (getTempFilename(_matesFastqPath) != 0)
+            status = 1;
+        if (getTempFilename(_singletonFastqPath) != 0)
+            status = 1;
     }
+    if (status != 0)
+        return status;
 
     append(_matesFastqPath, "_m.fq");  // Mate Pairs
     append(_singletonFastqPath, "_s.fq");  // Singletons
