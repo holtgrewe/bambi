@@ -678,10 +678,10 @@ int ConverterThread::_startFirstStep()
     // Generate temporary file name.
     SEQAN_OMP_PRAGMA(critical(temp_filename))
     {
-        _leftPileFastqPath = SEQAN_TEMP_FILENAME();
-        _rightPileFastqPath = SEQAN_TEMP_FILENAME();
-        _matesFastqPath = SEQAN_TEMP_FILENAME();
-        _singletonFastqPath = SEQAN_TEMP_FILENAME();
+        _leftPileFastqPath = tmpnam(NULL);
+        _rightPileFastqPath = tmpnam(NULL);
+        _matesFastqPath = tmpnam(NULL);
+        _singletonFastqPath = tmpnam(NULL);
     }
 
     append(_matesFastqPath, "_m.fq");  // Mate Pairs
