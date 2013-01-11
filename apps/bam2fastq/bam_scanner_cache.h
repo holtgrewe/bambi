@@ -142,7 +142,7 @@ end(BamScannerCache & cache, seqan::Standard const & /*tag*/)
 // Function erase()
 // ----------------------------------------------------------------------------
 
-void erase(BamScannerCache & cache, seqan::Iterator<BamScannerCache const>::Type it)
+void erase(BamScannerCache & cache, seqan::Iterator<BamScannerCache>::Type it)
 {
     cache._map.erase(it);
 }
