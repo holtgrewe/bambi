@@ -113,7 +113,7 @@ parseCommandLine(Options & options, int argc, char const ** argv)
     seqan::ArgumentParser parser("bam2fastq");
     // Set short description, version, and date.
     setShortDescription(parser, "Convert BAM to FASTQ");
-    setVersion(parser, "0.0");
+    setVersion(parser, "0.1");
     setDate(parser, "January 2013");
 
     // Define usage line and long description.
@@ -180,6 +180,10 @@ parseCommandLine(Options & options, int argc, char const ** argv)
             "The value for \\fB--tile-length\\fP determines the granularity.  It has to be greater than "
             "\\fB--max-template-length\\fP and is probably best left in he mega base order of magnitude.");
 
+    // Add Author Section.
+    addTextSection(parser, "Author");
+    addText(parser, "Manuel Holtgrewe <manuel.holtgrewe@fu-berlin.de>");
+
     // Parse command line.
     seqan::ArgumentParser::ParseResult res = seqan::parse(parser, argc, argv);
 
@@ -230,7 +234,7 @@ int main(int argc, char const ** argv)
     // Print program header.
     std::cerr << "BAM 2 FASTQ\n"
               << "===========\n\n";
-    
+
     // Print the command line arguments back to the user.
     printOptions(std::cerr, options);
 

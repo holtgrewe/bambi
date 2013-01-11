@@ -47,7 +47,7 @@ The project is distributed as a SeqAn sandbox.  Here is how to build it:
     release # ./bin/bam2fastq -h
 
   If you prefer to look at man files then you can create one:
-  
+
      release # ./bin/bam2fastq --export-help=man > bam2fastq.1.man
      release # man ./bam2fastq.1.man
 
@@ -58,9 +58,9 @@ The project is distributed as a SeqAn sandbox.  Here is how to build it:
 
   (5) We now get an example BAM file from the gasv project (see
       http://code.google.com/p/gasv/downloads/detail?name=Example.bam)
-  
+
     release # wget http://gasv.googlecode.com/files/Example.bam
-    
+
   We now need a BAI index for the file.  We build this index usin samtools.
 
     release # samtools index Example.bam
@@ -70,7 +70,7 @@ The project is distributed as a SeqAn sandbox.  Here is how to build it:
     release # ./bin/bam2fastq -i Example.bam -o out.fq -nt 4
 
   The last lines of the bam2fastq output to stdout should read:
-  
+
     Done converting BAM to FASTQ
       Converted orphans:      25756
                   singletons: 0
@@ -80,7 +80,7 @@ The project is distributed as a SeqAn sandbox.  Here is how to build it:
                   paired:     1974244
 
   We now have two files out.fq and out.singleton.fq.
-  
+
   The file out.fq contain the paired reads interleaved order, e.g. (first
   read of pair A, second read of pair A, first read of pair B, second red of
   pair B).  Note that the order is not the same as in the original input.
@@ -96,3 +96,10 @@ Tutorial:
 
     http://trac.seqan.de/wiki/Tutorial/GettingStarted
 
+
+Author and License
+------------------
+
+    Manuel Holtgrew <manuel.holtgrewe@fu-berlin.de>
+
+The programs in this repository are published under the 3-clause BSD license.
