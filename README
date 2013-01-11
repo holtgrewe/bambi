@@ -1,16 +1,98 @@
 BAMBI - Tools for processing BAM files
 ======================================
 
-This is a small collection of tools for processing BAM files.
+Currently, there only is the bam2fastq program.
 
-The project is a SeqAn sandbox.  See the SeqAn Getting Started tutorial to see
-for details on how you can build it:
+
+Prerequisites
+-------------
+
+For building bam2fastq, you need the following prequisites:
+
+ * Currently, only Linux and Mac Os X are supported.
+ * CMake, version >= 2.8.2
+ * zlib, "development" version, including the headers.  Chances are good that
+   you already have it installed.
+ * The GNU g++ compiler with C++0x or C++11 support (for std::shared_ptr<>)
+ * OpenMP support for the g++ compiler.
+
+
+Installation
+------------
+
+The project is distributed as a SeqAn sandbox.  Here is how to build it:
+
+  (1) Check out SeqAn from the SVN repository.
+
+    Development # svn co http://svn.seqan.de/seqan/trunk seqan-trunk
+
+  (2) Check out this repository as a sandbox using Git:
+
+    Development # cd seqan-trunk/sandbox
+    seqan-trunk # git clone git://github.com/holtgrewe/bambi.git
+    seqan-trunk # cd ../..
+
+  (3) Build the bam2fastq program.  Note that depending on the GCC version
+      you are using, you have to use -std=c++0x (older versions) or
+      -std=c++11 (newer version, e.g. g++-4.7).  Consult "man g++" for
+      the exact flag value to use.
+
+    Development # mkdir -p seqan-trunk-build/release
+    Development # cd seqan-trunk-build/release
+    release # cmake ../../seqan-trunk -DCMAKE_CXX_FLAGS="-std=c++0x"
+    release # make bam2fastq
+
+  (4) You are now read to use bam2fastq. Let us look at the help first.
+
+    release # ./bin/bam2fastq -h
+
+  If you prefer to look at man files then you can create one:
+  
+     release # ./bin/bam2fastq --export-help=man > bam2fastq.1.man
+     release # man ./bam2fastq.1.man
+
+  If you prefer to look at HTML help then you can also do this:
+
+      release # ./bin/bam2fastq --export-help=html > bam2fastq.html
+      release # BROWSER bam2fastq.html
+
+  (5) We now get an example BAM file from the gasv project (see
+      http://code.google.com/p/gasv/downloads/detail?name=Example.bam)
+  
+    release # wget http://gasv.googlecode.com/files/Example.bam
+    
+  We now need a BAI index for the file.  We build this index usin samtools.
+
+    release # samtools index Example.bam
+
+  Then, we convert the example BAM file into a FASTQ file using four threads.
+
+    release # ./bin/bam2fastq -i Example.bam -o out.fq -nt 4
+
+  The last lines of the bam2fastq output to stdout should read:
+  
+    Done converting BAM to FASTQ
+      Converted orphans:      25756
+                  singletons: 0
+                  paired:     25756
+                mapped reads: 1974244
+                  singletons: 0
+                  paired:     1974244
+
+  We now have two files out.fq and out.singleton.fq.
+  
+  The file out.fq contain the paired reads interleaved order, e.g. (first
+  read of pair A, second read of pair A, first read of pair B, second red of
+  pair B).  Note that the order is not the same as in the original input.
+
+  The file out.singletons.fq contains any unpaired from the input file.
+
+
+Detailed SeqAn Build and Prerequisites
+--------------------------------------
+
+More details on the CMake step can be found in the SeqAn Getting Started
+Tutorial:
 
     http://trac.seqan.de/wiki/Tutorial/GettingStarted
 
-The short version is:
-
- * Check out SeqAn.
- * Check out this repository into sandbox/bambi.
- * Call CMake for SeqAn.
- * Build the apps in this sandbox.
