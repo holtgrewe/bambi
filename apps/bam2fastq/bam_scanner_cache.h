@@ -85,14 +85,14 @@ namespace seqan {
 template <>
 struct Iterator<BamScannerCache>
 {
-    typedef typename BamScannerCache::TMap::const_iterator Type;
+    typedef BamScannerCache::TMap::iterator Type;
 };
 
 template <>
 struct Iterator<BamScannerCache const>
 {
     typedef BamScannerCache const TCache_;
-    typedef typename TCache_::TMap::const_iterator Type;
+    typedef TCache_::TMap::const_iterator Type;
 };
 
 }  // namespace seqan

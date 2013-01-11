@@ -39,7 +39,7 @@ The project is distributed as a SeqAn sandbox.  Here is how to build it:
 
     Development # mkdir -p seqan-trunk-build/release
     Development # cd seqan-trunk-build/release
-    release # cmake ../../seqan-trunk -DCMAKE_CXX_FLAGS="-std=c++0x"
+    release # CXX_FLAGS=-std=c++0x cmake ../../seqan-trunk
     release # make bam2fastq
 
   (4) You are now read to use bam2fastq. Let us look at the help first.
