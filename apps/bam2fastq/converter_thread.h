@@ -272,7 +272,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
     // Jump to the first record processed on the tile.  Return from function if a record is found that is right of the
     // tile and none on the tile.  A record to be processed on the tile is part of a pair that is completely on the tile
     // or that spans the tile and the one before.
-    jumpToPos(bamStream, job.rId, std::max(job.beginPos - mtl, 0), baiIndex);
+    jumpToRegion(bamStream, job.rId, std::max(job.beginPos - mtl, 0), job.endPos, baiIndex);
     if (atEnd(bamStream))
         return;  // Done, no error.
     while (!atEnd(bamStream))
