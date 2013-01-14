@@ -580,7 +580,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                       << "The problematic records are as follows:\n"
                       << "<begin>\n";
             for (auto it = scannerCache._map.begin(); it != scannerCache._map.end(); ++it)
-                write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+                write2(std::cerr, it->second, bamStream.bamIOContext, seqan::Sam());
             std::cerr << "<end>\n";
         }
     }

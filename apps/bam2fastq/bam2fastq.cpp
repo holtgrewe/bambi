@@ -333,6 +333,8 @@ int main(int argc, char const ** argv)
             {
                 if (threads[omp_get_thread_num()].dot())
                     std::cerr << ".";
+                if (options.verbosity >= 2)
+                    std::cerr << "[thread " << omp_get_thread_num() << ", job done, rId=" << job.rId << ", beginPos=" << job.beginPos << ", endPos=" << job.endPos << "]";
             }
         }
     }
@@ -365,7 +367,7 @@ int main(int argc, char const ** argv)
         std::cerr << "\nERROR: Could not open " << singletonPath << " for writing!\n";
         return 1;
     }
-    // Write out data.    
+    // Write out data.
     for (unsigned i = 0; i < length(threads); ++i)
     {
         if (threads[i].writeResult(peOut, singletonOut) != 0)
