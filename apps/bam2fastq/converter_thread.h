@@ -571,8 +571,20 @@ void ConverterThread::convertMapped(ConverterJob const & job)
     }
 
     if (!empty(scannerCache))
-        dumpCache(scannerCache);
-    SEQAN_CHECK(empty(scannerCache), "Invalid pairing, probably some POS/PNEXT, RID/RNEXT field is wrong!");
+    {
+        SEQAN_OMP_PRAGMA(critical (io))
+        {
+            std::cerr << "WARNING: Did not find mate for some records in the cache.\n"
+                      << "The reason could be erroneous data in the BAM file or a bug in the program.\n"
+                      << "\n"
+                      << "The problematic records are as follows:\n"
+                      << "<begin>\n";
+            for (auto it = scannerCache._map.begin(); it != scannerCache._map.end(); ++it)
+                write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
+            std::cerr << "<end>\n";
+        }
+    }
+    clear(scannerCache);
 
     _updateDot();
 }
