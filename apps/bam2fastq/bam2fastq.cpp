@@ -410,14 +410,14 @@ int main(int argc, char const ** argv)
         {
             if (readRecord(id, seq, qual, rightPileStream) != 0)
             {
-                std::cerr << "\nERROR: Could not write record from left pile of " << i << "\n";
+                std::cerr << "\nERROR: Could not read record from right pile of " << i << "\n";
                 return 1;
             }
             unsigned idx = 0;
             if (!getIdByName(ids, id, idx, idsCache))
             {
-                std::cerr << "ERROR: Could not find read " << id << " in left pile.\n";
-                return 1;
+                std::cerr << "WARNING: Could not find read " << id << " in left pile.\n";
+                continue;
             }
             if (writeRecord(peOut, ids[idx], seqs[idx], quals[idx]) != 0)
             {
