@@ -71,7 +71,10 @@ struct ConversionOptions
     // The chunk length.
     unsigned chunkLength;
 
-    ConversionOptions() : maxTemplateLength(0), chunkLength(0)
+    // The verbosity.
+    int verbosity;
+
+    ConversionOptions() : maxTemplateLength(0), chunkLength(0), verbosity(1)
     {}
 };
 
@@ -245,7 +248,7 @@ public:
     // State for the printing of dots (every 100 packages).
     int _dotCounter;
     bool _dot;
-    
+
     // Stream for reading BAM file.
     std::shared_ptr<seqan::BamStream> _bamStream;
     // Index on BAM file.
@@ -389,9 +392,23 @@ void ConverterThread::convertMapped(ConverterJob const & job)
         // Write out chunk if it is over the size.
         if (buffer.numSeqs >= _options.chunkLength)
         {
+            if (_options.verbosity >= 2)
+            {
+                SEQAN_OMP_PRAGMA(critical (io))
+                {
+                    std::cerr << "thread " << omp_get_thread_num() << " BEGINS writing to sink.\n";
+                }
+            }
             if (buffer.writeToSink(*_sink) != 0)
                 return;  // TOOD(holtgrew): Indicate failure.
             buffer.clear();
+            if (_options.verbosity >= 2)
+            {
+                SEQAN_OMP_PRAGMA(critical (io))
+                {
+                    std::cerr << "thread " << omp_get_thread_num() << " STOPPED writing to sink.\n";
+                }
+            }
         }
 
         // Break if record right of this tile.  Skip if we are not to process this record for this tile.
@@ -515,9 +532,23 @@ void ConverterThread::convertMapped(ConverterJob const & job)
     }
     clear(scannerCache);
 
+    if (_options.verbosity >= 2)
+    {
+        SEQAN_OMP_PRAGMA(critical (io))
+        {
+            std::cerr << "thread " << omp_get_thread_num() << " BEGINS writing to sink.\n";
+        }
+    }
     if (buffer.writeToSink(*_sink) != 0)
         return;  // TOOD(holtgrew): Indicate failure.
     buffer.clear();
+    if (_options.verbosity >= 2)
+    {
+        SEQAN_OMP_PRAGMA(critical (io))
+        {
+            std::cerr << "thread " << omp_get_thread_num() << " STOPPED writing to sink.\n";
+        }
+    }
 
     _updateDot();
 }
@@ -530,6 +561,14 @@ void ConverterThread::convertOrphans()
 {
     if (_state == START)
         _start();
+
+    if (_options.verbosity >= 2)
+    {
+        SEQAN_OMP_PRAGMA(critical (io))
+        {
+            std::cerr << "thread " << omp_get_thread_num() << " begins converting orphans.\n";
+        }
+    }
 
     // Get shortcuts to streams and indices, also reduces overhead through dereferencing the shared_ptr.
     seqan::BamStream & bamStream = *_bamStream;
@@ -547,9 +586,23 @@ void ConverterThread::convertOrphans()
         // Write out chunk if it is over the size.
         if (buffer.numSeqs >= _options.chunkLength)
         {
+            if (_options.verbosity >= 2)
+            {
+                SEQAN_OMP_PRAGMA(critical (io))
+                {
+                    std::cerr << "thread " << omp_get_thread_num() << " BEGINS writing to sink.\n";
+                }
+            }
             if (buffer.writeToSink(*_sink) != 0)
                 return;  // TOOD(holtgrew): Indicate failure.
             buffer.clear();
+            if (_options.verbosity >= 2)
+            {
+                SEQAN_OMP_PRAGMA(critical (io))
+                {
+                    std::cerr << "thread " << omp_get_thread_num() << " STOPPED writing to sink.\n";
+                }
+            }
         }
 
         // Read first/single record.
@@ -579,9 +632,31 @@ void ConverterThread::convertOrphans()
     }
 
     // Write remaining records to output file.
+    if (_options.verbosity >= 2)
+    {
+        SEQAN_OMP_PRAGMA(critical (io))
+        {
+            std::cerr << "thread " << omp_get_thread_num() << " BEGINS writing to sink.\n";
+        }
+    }
     if (buffer.writeToSink(*_sink) != 0)
         return;  // TOOD(holtgrew): Indicate failure.
     buffer.clear();
+    if (_options.verbosity >= 2)
+    {
+        SEQAN_OMP_PRAGMA(critical (io))
+        {
+            std::cerr << "thread " << omp_get_thread_num() << " STOPPED writing to sink.\n";
+        }
+    }
+
+    if (_options.verbosity >= 2)
+    {
+        SEQAN_OMP_PRAGMA(critical (io))
+        {
+            std::cerr << "thread " << omp_get_thread_num() << " is done converting orphans.\n";
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------

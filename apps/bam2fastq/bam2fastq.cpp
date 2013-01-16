@@ -248,7 +248,6 @@ parseCommandLine(Options & options, int argc, char const ** argv)
             "also influence the automatically generated out file names.  You can enforce the file names by "
             "setting \\fB-oL\\fP/\\fB--out-file-left\\fP, \\fB-oR\\fP/\\fB--out-file-right\\fP, and "
             "\\fB-oS\\fP/\\fB--out-file-single\\fP.");
-    
 
     // Add Author Section.
     addTextSection(parser, "Author");
@@ -474,6 +473,7 @@ int main(int argc, char const ** argv)
     convOptions.inputPath = options.inputPath;
     convOptions.maxTemplateLength = options.maxTemplateLength;
     convOptions.chunkLength = options.chunkLength;
+    convOptions.verbosity = options.verbosity;
 
     // The SequenceSink allows thread-safe writing of blocks of FASTQ data.
     SequenceSink sink(options.interleavedOut, options.gzipOutput, toCString(options.outputPathLeft),
@@ -516,7 +516,7 @@ int main(int argc, char const ** argv)
             {
                 if (threads[omp_get_thread_num()].dot())
                     std::cerr << ".";
-                if (options.verbosity >= 2)
+                if (options.verbosity == 2)
                     std::cerr << "[thread " << omp_get_thread_num() << ", job done, rId=" << job.rId << ", beginPos=" << job.beginPos << ", endPos=" << job.endPos << "]";
             }
         }
