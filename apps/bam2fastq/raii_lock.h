@@ -31,17 +31,13 @@
 // ==========================================================================
 // Author: Manuel Holtgrewe <manuel.holtgrewe@fu-berlin.de>
 // ==========================================================================
-// Simple, thread-safe data structure for jobs (intervals on chromsomes).
+// RAII lock guard for OpenMP's omp_lock_t.
 // ==========================================================================
 
-#ifndef SANDBOX_BAMBI_APPS_BAM2FASTQ_JOB_QUEUE_H_
-#define SANDBOX_BAMBI_APPS_BAM2FASTQ_JOB_QUEUE_H_
-
-#include <queue>
+#ifndef SANDBOX_BAMBI_APPS_BAM2FASTQ_RAII_LOCK_H_
+#define SANDBOX_BAMBI_APPS_BAM2FASTQ_RAII_LOCK_H_
 
 #include <omp.h>
-
-#include "raii_lock.h"
 
 // ============================================================================
 // Forwards
@@ -51,109 +47,19 @@
 // Tags, Classes, Enums
 // ============================================================================
 
-// ----------------------------------------------------------------------------
-// Class ConverterJob
-// ----------------------------------------------------------------------------
-
-// Data structure that encapsulates one conversion job.  A conversion job consists of an interval on a chromsome.  Any
-// overlapping window computation is handled by the conversion threads themselves.
-//
-// A rId value of -1 leads marks an invalid job.
-
-struct ConverterJob
-{
-    // Id/index of the reference id.
-    int rId;
-    // Begin position of the job on the reference/chromosome.
-    int beginPos;
-    // End position of the job on the reference/chromsome.
-    int endPos;
-
-    ConverterJob() : rId(-1), beginPos(0), endPos(0)
-    {}
-
-    ConverterJob(int rId, int beginPos, int endPos) : rId(rId), beginPos(beginPos), endPos(endPos)
-    {}
-};
-
-// ----------------------------------------------------------------------------
-// Class JobQueue
-// ----------------------------------------------------------------------------
-
-// A data structure for the thread-safe accessing of threads.
-
-class JobQueue
+class RaiiLock
 {
 public:
-    // The actual job queue.
-    std::queue<ConverterJob> _queue;
+    omp_lock_t & _lock;
 
-    // The OpenMP lock for thread safety.
-    mutable omp_lock_t _lock;
-
-    // Constructor, initialize lock.
-    JobQueue()
+    RaiiLock(omp_lock_t & _lock) : _lock(_lock)
     {
-        omp_init_lock(&_lock);
+        omp_set_lock(&_lock);
     }
 
-    // Destructor, free lock again.
-    ~JobQueue()
+    ~RaiiLock()
     {
-        omp_destroy_lock(&_lock);
-    }
-
-    // Push one lock.
-    void push(ConverterJob const & job)
-    {
-        // Lock data structure.
-        RaiiLock lockGuard(_lock);
-
-        _queue.push(job);
-    }
-
-    // Push a range of locks.
-    template <typename TIter>
-    void push(TIter itBegin, TIter itEnd)
-    {
-        // Lock data structure.
-        RaiiLock lockGuard(_lock);
-
-        for (TIter it = itBegin; it != itEnd; ++it)
-            _queue.push(*it);
-    }
-
-    // Returns whether the queue is empty.
-    bool empty() const
-    {
-        bool res = _queue.empty();
-        return res;
-    }
-
-    // Returns the number of elements in the queue.
-    size_t size() const
-    {
-        return _queue.size();
-    }
-
-    // Get the next job.  Return true if there was a job left and false otherwise.
-    bool pop(ConverterJob & job)
-    {
-        // Initialize return value with false (could not get job), and initially mark job as invalid.
-        bool res = false;
-        job.rId = -1;
-
-        // Lock data structure.
-        RaiiLock lockGuard(_lock);
-
-        if (!_queue.empty())
-        {
-            job = _queue.front();
-            _queue.pop();
-            res = true;
-        }
-
-        return res;
+        omp_unset_lock(&_lock);
     }
 };
 
@@ -165,4 +71,4 @@ public:
 // Functions
 // ============================================================================
 
-#endif  // #ifndef SANDBOX_BAMBI_APPS_BAM2FASTQ_JOB_QUEUE_H_
+#endif  // #ifndef SANDBOX_BAMBI_APPS_BAM2FASTQ_RAII_LOCK_H_

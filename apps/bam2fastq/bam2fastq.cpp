@@ -45,6 +45,7 @@
 
 #include "job_queue.h"
 #include "converter_thread.h"
+#include "sequence_sink.h"
 
 // ==========================================================================
 // Classes
@@ -68,6 +69,8 @@ struct Options
     // The maximal expected template length.  Everything that has a greater tlen will be handled with the "pile"
     // handling, i.e. integrated in a second step.
     int maxTemplateLength;
+    // Chunk length for buffering input records.
+    unsigned chunkLength;
 
     // Path to input BAM file.
     seqan::CharString inputPath;
@@ -109,21 +112,22 @@ void printOptions(std::ostream & out, Options const & options)
 {
     out << "__OPTIONS____________________________________________________________________\n"
         << "\n"
-        << "VERBOSITY\t" << options.verbosity << "\n"
+        << "VERBOSITY                  \t" << options.verbosity << "\n"
         << "\n"
-        << "NUM THREADS\t" << options.numThreads << "\n"
+        << "NUM THREADS                \t" << options.numThreads << "\n"
         << "\n"
-        << "TILE LENGTH\t" << options.tileLength << "\n"
-        << "MAX TPL LENGTH\t" << options.maxTemplateLength << "\n"
+        << "TILE LENGTH                \t" << options.tileLength << "\n"
+        << "MAX TPL LENGTH             \t" << options.maxTemplateLength << "\n"
+        << "CHUNK LENGTH               \t" << options.chunkLength << "\n"
         << "\n"
-        << "WRITE INTERLEAVED\t" << yesNo(options.interleavedOut) << "\n"
-        << "GZIP OUTPUT\t" << yesNo(options.gzipOutput) << "\n"
-        << "OUTPUT FILE SEGMENT SEPARATOR\t" << options.outSep << "\n"
+        << "WRITE INTERLEAVED          \t" << yesNo(options.interleavedOut) << "\n"
+        << "GZIP OUTPUT                \t" << yesNo(options.gzipOutput) << "\n"
+        << "FILE NAME SEGMENT SEPARATOR\t\"" << options.outSep << "\"\n"
         << "\n"
-        << "INPUT PATH\t" << options.inputPath << "\n"
-        << "OUTPUT PATH LEFT\t" << options.outputPathLeft << "\n"
-        << "OUTPUT PATH RIGHT\t" << options.outputPathRight << "\n"
-        << "OUTPUT PATH SINGLE\t" << options.outputPathSingle << "\n";
+        << "INPUT PATH                 \t" << options.inputPath << "\n"
+        << "OUTPUT PATH LEFT           \t" << options.outputPathLeft << "\n"
+        << "OUTPUT PATH RIGHT          \t" << options.outputPathRight << "\n"
+        << "OUTPUT PATH SINGLE         \t" << options.outputPathSingle << "\n";
 }
 
 // --------------------------------------------------------------------------
@@ -162,6 +166,11 @@ parseCommandLine(Options & options, int argc, char const ** argv)
     addOption(parser, seqan::ArgParseOption("nt", "num-threads", "Number of threads to use.",
                                             seqan::ArgParseOption::INTEGER, "THREADS"));
     setMinValue(parser, "num-threads", "1");
+
+    addOption(parser, seqan::ArgParseOption("", "chunk-length", "Number of records to read before writing out.",
+                                            seqan::ArgParseOption::INTEGER, "NUM"));
+    setMinValue(parser, "chunk-length", "1");
+    setDefaultValue(parser, "chunk-length", "320000");
 
     addOption(parser, seqan::ArgParseOption("", "tile-length", "Tile length.",
                                             seqan::ArgParseOption::INTEGER, "LEN"));
@@ -262,6 +271,7 @@ parseCommandLine(Options & options, int argc, char const ** argv)
 
     getOptionValue(options.numThreads, parser, "num-threads");
 
+    getOptionValue(options.chunkLength, parser, "chunk-length");
     getOptionValue(options.tileLength, parser, "tile-length");
     getOptionValue(options.maxTemplateLength, parser, "max-template-length");
 
@@ -336,6 +346,46 @@ parseCommandLine(Options & options, int argc, char const ** argv)
     }
 
     return seqan::ArgumentParser::PARSE_OK;
+}
+
+// --------------------------------------------------------------------------
+// Function processPiles()
+// --------------------------------------------------------------------------
+
+// Process pile members of threads.
+int processPiles(SequenceSink & sink, seqan::String<ConverterThread> & threads, Options const & options)
+{
+    // Build mapping from left read name to (thread id, thread-local seq id).
+    typedef std::map<seqan::CharString, std::pair<unsigned, unsigned> > TMap;
+    TMap leftIdMap;
+
+    for (unsigned i = 0; i < length(threads); ++i)
+        for (unsigned j = 0; j < length(threads[i].pile.leftIds); ++j)
+            leftIdMap[threads[i].pile.leftIds[j]] = std::make_pair(i, j);
+
+    // Process right reads, chunk-wise for using with sequencSink.
+    ResultBuffer buffer;
+    for (unsigned i = 0; i < length(threads); ++i)
+    {
+        ResultBuffer const & pile = threads[i].pile;
+        for (unsigned j = 0; j < length(pile.rightIds); ++j)
+        {
+            TMap::const_iterator it = leftIdMap.find(pile.rightIds[j]);
+            if (it == leftIdMap.end())
+                continue;  // Skip if not in left pile.
+            int seqId = it->second.second;
+            ResultBuffer const & otherPile = threads[it->second.first].pile;
+            buffer.insert(
+                    otherPile.leftIds[seqId], otherPile.leftSeqs[seqId], otherPile.leftQuals[seqId],
+                    pile.rightIds[j], pile.rightSeqs[j], pile.rightQuals[j]);
+
+        }
+        if (buffer.writeToSink(sink) != 0)
+            return 1;
+        buffer.clear();
+    }
+
+    return 0;
 }
 
 // --------------------------------------------------------------------------
@@ -423,18 +473,23 @@ int main(int argc, char const ** argv)
     ConversionOptions convOptions;
     convOptions.inputPath = options.inputPath;
     convOptions.maxTemplateLength = options.maxTemplateLength;
+    convOptions.chunkLength = options.chunkLength;
+
+    // The SequenceSink allows thread-safe writing of blocks of FASTQ data.
+    SequenceSink sink(options.interleavedOut, options.gzipOutput, toCString(options.outputPathLeft),
+                      toCString(options.outputPathRight), toCString(options.outputPathSingle));
 
     std::cerr << "Creating threads ..." << std::flush;
     seqan::String<ConverterThread> threads;
     for (int i = 0; i < options.numThreads; ++i)
     {
-        ConverterThread thread(i, convOptions, jobQueue);
+        ConverterThread thread(sink, i, convOptions, jobQueue);
         appendValue(threads, thread);
     }
     std::cerr << " OK\n";
 
     startTime = sysTime();
-    std::cerr << "Conversion ... " << std::flush;
+    std::cerr << "Concordant Conversion ... " << std::flush;
 
     // Fire up threads.  The master does the orphan conversion first and then grabs jobs as all other threads.
     SEQAN_OMP_PRAGMA(parallel num_threads(options.numThreads))
@@ -471,86 +526,67 @@ int main(int argc, char const ** argv)
     std::cerr << "  Took " << (sysTime() - startTime) << " s\n";
 
     startTime = sysTime();
-    std::cerr << "Joining temporary FASTQ files ..." << std::flush;
-    // Open output files.
-    seqan::SequenceStream peOut(toCString(options.outputPathLeft), seqan::SequenceStream::WRITE);
-    if (!isGood(peOut))
-    {
-        std::cerr << "\nERROR: Could not open " << options.outputPathLeft << " for writing!\n";
-        return 1;
-    }
-    seqan::SequenceStream singletonOut(toCString(options.outputPathSingle), seqan::SequenceStream::WRITE);
-    if (!isGood(singletonOut))
-    {
-        std::cerr << "\nERROR: Could not open " << options.outputPathSingle << " for writing!\n";
-        return 1;
-    }
-    // Write out data.
-    for (unsigned i = 0; i < length(threads); ++i)
-    {
-        if (threads[i].writeResult(peOut, singletonOut) != 0)
-        {
-            std::cerr << "\nERROR: Could not write result for thread " << i << "\n";
-            return 1;
-        }
-    }
-    // Process piles.
-    //
-    // Read in all left pile sequences.
-    typedef seqan::StringSet<seqan::CharString> TCharStringSet;
-    TCharStringSet ids, seqs, quals;
-    for (unsigned i = 0; i < length(threads); ++i)
-    {
-        seqan::CharString id, seq, qual;
-        seqan::SequenceStream & leftPileStream = *threads[i]._leftPileSeqStream;
-        while (!atEnd(leftPileStream))
-        {
-            if (readRecord(id, seq, qual, leftPileStream) != 0)
-            {
-                std::cerr << "\nERROR: Could not write record from left pile of " << i << "\n";
-                return 1;
-            }
-            appendValue(ids, id);
-            appendValue(seqs, seq);
-            appendValue(quals, qual);
-        }
-    }
+    std::cerr << "Remaining Conversion ... " << std::flush;
 
-    // Build cache over the pile sequence names.
-    seqan::NameStoreCache<TCharStringSet> idsCache(ids);
+    if (processPiles(sink, threads, options) != 0)
+        return 1;
+    // // Process piles.
+    // //
+    // // Read in all left pile sequences.
+    // typedef seqan::StringSet<seqan::CharString> TCharStringSet;
+    // TCharStringSet ids, seqs, quals;
+    // for (unsigned i = 0; i < length(threads); ++i)
+    // {
+    //     seqan::CharString id, seq, qual;
+    //     seqan::SequenceStream & leftPileStream = *threads[i]._leftPileSeqStream;
+    //     while (!atEnd(leftPileStream))
+    //     {
+    //         if (readRecord(id, seq, qual, leftPileStream) != 0)
+    //         {
+    //             std::cerr << "\nERROR: Could not write record from left pile of " << i << "\n";
+    //             return 1;
+    //         }
+    //         appendValue(ids, id);
+    //         appendValue(seqs, seq);
+    //         appendValue(quals, qual);
+    //     }
+    // }
 
-    // Read in all right pile sequences.
-    for (unsigned i = 0; i < length(threads); ++i)
-    {
-        seqan::CharString id, seq, qual;
-        seqan::SequenceStream & rightPileStream = *threads[i]._rightPileSeqStream;
-        while (!atEnd(rightPileStream))
-        {
-            if (readRecord(id, seq, qual, rightPileStream) != 0)
-            {
-                std::cerr << "\nERROR: Could not read record from right pile of " << i << "\n";
-                return 1;
-            }
-            unsigned idx = 0;
-            if (!getIdByName(ids, id, idx, idsCache))
-            {
-                std::cerr << "WARNING: Could not find read " << id << " in left pile.\n";
-                continue;
-            }
-            if (writeRecord(peOut, ids[idx], seqs[idx], quals[idx]) != 0)
-            {
-                std::cerr << "\nERROR: Could not write to PE output file\n";
-                return 1;
-            }
-            if (writeRecord(peOut, id, seq, qual) != 0)
-            {
-                std::cerr << "\nERROR: Could not write to PE output file\n";
-                return 1;
-            }
-        }
-    }
-    std::cerr << " OK\n";
-    std::cerr << "  Took " << (sysTime() - startTime) << " s\n";
+    // // Build cache over the pile sequence names.
+    // seqan::NameStoreCache<TCharStringSet> idsCache(ids);
+
+    // // Read in all right pile sequences.
+    // for (unsigned i = 0; i < length(threads); ++i)
+    // {
+    //     seqan::CharString id, seq, qual;
+    //     seqan::SequenceStream & rightPileStream = *threads[i]._rightPileSeqStream;
+    //     while (!atEnd(rightPileStream))
+    //     {
+    //         if (readRecord(id, seq, qual, rightPileStream) != 0)
+    //         {
+    //             std::cerr << "\nERROR: Could not write record from left pile of " << i << "\n";
+    //             return 1;
+    //         }
+    //         unsigned idx = 0;
+    //         if (!getIdByName(ids, id, idx, idsCache))
+    //         {
+    //             std::cerr << "ERROR: Could not find read " << id << " in left pile.\n";
+    //             return 1;
+    //         }
+    //         if (writeRecord(peOut, ids[idx], seqs[idx], quals[idx]) != 0)
+    //         {
+    //             std::cerr << "\nERROR: Could not write to PE output file\n";
+    //             return 1;
+    //         }
+    //         if (writeRecord(peOut, id, seq, qual) != 0)
+    //         {
+    //             std::cerr << "\nERROR: Could not write to PE output file\n";
+    //             return 1;
+    //         }
+    //     }
+    // }
+    // std::cerr << " OK\n";
+    // std::cerr << "  Took " << (sysTime() - startTime) << " s\n";
 
     std::cerr << "\nDone converting BAM to FASTQ\n";
     // Sum up statistics on orphans.

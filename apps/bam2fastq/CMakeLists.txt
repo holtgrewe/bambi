@@ -33,7 +33,9 @@ add_executable (bam2fastq
                 bam2fastq.cpp
                 bam_scanner_cache.h
                 converter_thread.h
-                job_queue.h)
+                job_queue.h
+                raii_lock.h
+                sequence_sink.h)
 
 # Add dependencies found by find_package (SeqAn).
 target_link_libraries (bam2fastq ${SEQAN_LIBRARIES})
