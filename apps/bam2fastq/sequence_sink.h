@@ -57,25 +57,25 @@ typedef seqan::StringSet<seqan::Dna5String, seqan::Owner<seqan::ConcatDirect<> >
 class SequenceSink
 {
 public:
-    // The names of the left/right/single output files.
-    seqan::CharString pathLeft, pathRight, pathSingle;
-
     // Sequence stream objects for writing out the sequences.
     seqan::SequenceStream outLeft, outRight, outSingle;
-
-    // Whether or not we have already opened the sequence streams.
-    bool isOpenLeft, isOpenRight, isOpenSingle;
 
     // Whether or not to write out paired-end reads in an interleaved fashion.
     bool interleaved;
     // Whether or not to compress the output files.
     bool gzip;
 
+    // The names of the left/right/single output files.
+    seqan::CharString pathLeft, pathRight, pathSingle;
+
+    // Whether or not we have already opened the sequence streams.
+    bool isOpenLeft, isOpenRight, isOpenSingle;
+
     // The OpenMP lock for thread safety.
     omp_lock_t _lock;
 
     SequenceSink(bool interleaved, bool gzip, char const * pathLeft, char const * pathRight, char const * pathSingle) :
-            interleaved(false), gzip(gzip), pathLeft(pathLeft), pathRight(pathRight), pathSingle(pathSingle),
+            interleaved(interleaved), gzip(gzip), pathLeft(pathLeft), pathRight(pathRight), pathSingle(pathSingle),
             isOpenLeft(false), isOpenRight(false), isOpenSingle(false)
     {
         omp_init_lock(&_lock);

@@ -353,7 +353,7 @@ parseCommandLine(Options & options, int argc, char const ** argv)
 // --------------------------------------------------------------------------
 
 // Process pile members of threads.
-int processPiles(SequenceSink & sink, seqan::String<ConverterThread> & threads, Options const & options)
+int processPiles(SequenceSink & sink, seqan::String<ConverterThread> & threads)
 {
     // Build mapping from left read name to (thread id, thread-local seq id).
     typedef std::map<seqan::CharString, std::pair<unsigned, unsigned> > TMap;
@@ -528,7 +528,7 @@ int main(int argc, char const ** argv)
     startTime = sysTime();
     std::cerr << "Remaining Conversion ... " << std::flush;
 
-    if (processPiles(sink, threads, options) != 0)
+    if (processPiles(sink, threads) != 0)
         return 1;
 
     std::cerr << "\nDone converting BAM to FASTQ\n";
