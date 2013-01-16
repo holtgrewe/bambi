@@ -71,17 +71,35 @@ struct Options
 
     // Path to input BAM file.
     seqan::CharString inputPath;
-    // Path to output FASTQ file.
-    seqan::CharString outputPath;
+    // Path to output FASTQ file for left/right paired and singleton reads.  outputPathLeft is used in case
+    // interleavedOut is true.
+    seqan::CharString outputPathLeft, outputPathRight, outputPathSingle;
+
+    // Whether or not to write interleavedly to outputPathLeft.
+    bool interleavedOut;
+    // Whether or not to gzip the output.
+    bool gzipOutput;
+    // The string to use for joining "1", "2", and "S" to the input in the output filename.
+    seqan::CharString outSep;
 
     Options() :
-            verbosity(1), numThreads(1), tileLength(0), maxTemplateLength(0)
+            verbosity(1), numThreads(1), tileLength(0), maxTemplateLength(0),
+            interleavedOut(false), gzipOutput(false)
     {}
 };
 
 // ==========================================================================
 // Functions
 // ==========================================================================
+
+// --------------------------------------------------------------------------
+// Function yesNo()
+// --------------------------------------------------------------------------
+
+char const * yesNo(bool b)
+{
+    return b ? "YES" : "NO";
+}
 
 // --------------------------------------------------------------------------
 // Function printOptions()
@@ -98,8 +116,14 @@ void printOptions(std::ostream & out, Options const & options)
         << "TILE LENGTH\t" << options.tileLength << "\n"
         << "MAX TPL LENGTH\t" << options.maxTemplateLength << "\n"
         << "\n"
+        << "WRITE INTERLEAVED\t" << yesNo(options.interleavedOut) << "\n"
+        << "GZIP OUTPUT\t" << yesNo(options.gzipOutput) << "\n"
+        << "OUTPUT FILE SEGMENT SEPARATOR\t" << options.outSep << "\n"
+        << "\n"
         << "INPUT PATH\t" << options.inputPath << "\n"
-        << "OUTPUT PATH\t" << options.outputPath << "\n";
+        << "OUTPUT PATH LEFT\t" << options.outputPathLeft << "\n"
+        << "OUTPUT PATH RIGHT\t" << options.outputPathRight << "\n"
+        << "OUTPUT PATH SINGLE\t" << options.outputPathSingle << "\n";
 }
 
 // --------------------------------------------------------------------------
@@ -117,7 +141,7 @@ parseCommandLine(Options & options, int argc, char const ** argv)
     setDate(parser, "January 2013");
 
     // Define usage line and long description.
-    addUsageLine(parser, "[\\fIOPTIONS\\fP] \\fB-i\\fP \\fIIN.bam\\fP \\fB-o\\fP \\fIOUT.fq\\fP");
+    addUsageLine(parser, "[\\fIOPTIONS\\fP] \\fB-i\\fP \\fIIN.bam\\fP");
     addDescription(parser,
                    "Convert the input BAM file into a FASTQ file.  The BAI index for this file. "
                    "must already exist.");
@@ -125,7 +149,8 @@ parseCommandLine(Options & options, int argc, char const ** argv)
                    "In the first step, each thread scans over its part of the genome and writes out "
                    "all singletons and mate pairs that have a template length below a threshold. "
                    "In a second step, all other mate pairs are processed.  See section Parameter "
-                   "Overview below.");
+                   "Overview below.  See the section Output Files for details on the "
+                   "output file name creation.");
 
     addOption(parser, seqan::ArgParseOption("q", "quiet", "Set verbosity to a minimum."));
     addOption(parser, seqan::ArgParseOption("v", "verbose", "Enable verbose output."));
@@ -156,9 +181,31 @@ parseCommandLine(Options & options, int argc, char const ** argv)
     setRequired(parser, "in-file");
 
     addOption(parser, seqan::ArgParseOption("o", "out-file",
-                                            "Output FASTQ file.",
+                                            "Output FASTQ file base name (use OUT to get OUT_1.fastq, OUT_2.fastq, "
+                                            "and OUT_S.fastq).  Defaults to IN if input is IN.bam.",
+                                            seqan::ArgParseOption::STRING, "OUT"));
+
+    addOption(parser, seqan::ArgParseOption("oL", "out-file-left", "Output path for left paired reads.",
                                             seqan::ArgParseOption::OUTPUTFILE, "OUT"));
-    setRequired(parser, "out-file");
+
+    addOption(parser, seqan::ArgParseOption("oR", "out-file-right", "Output path for right paired reads.",
+                                            seqan::ArgParseOption::OUTPUTFILE, "OUT"));
+
+    addOption(parser, seqan::ArgParseOption("oS", "out-file-single", "Output path for single reads.",
+                                            seqan::ArgParseOption::OUTPUTFILE, "OUT"));
+
+    addOption(parser, seqan::ArgParseOption("z", "gzip-output", "Compress the output files using gzip."));
+
+    addOption(parser, seqan::ArgParseOption("s", "out-name-sep",
+                                            "Separator to use in output filename.  If the output file name is "
+                                            "automatically determined, it is the \"\\fB_\\fP\" in the output "
+                                            "file names NAME_1.fastq, NAME_2.fastq, NAME_S.fastq",
+                                            seqan::ArgParseOption::STRING, "SEP"));
+    setDefaultValue(parser, "out-name-sep", "_");
+
+    addOption(parser, seqan::ArgParseOption("", "interleaved",
+                                            "Write output interleaved. Only one file for paired reads is generated "
+                                            "in this case."));
 
     // Add Examples Section.
     addTextSection(parser, "Examples");
@@ -179,6 +226,20 @@ parseCommandLine(Options & options, int argc, char const ** argv)
     addText(parser,
             "The value for \\fB--tile-length\\fP determines the granularity.  It has to be greater than "
             "\\fB--max-template-length\\fP and is probably best left in he mega base order of magnitude.");
+
+    // Add Output File Section.
+    addTextSection(parser, "Output Files");
+    addText(parser,
+            "The program will write out the paired reads as (possibly split into left and right reads) "
+            "and the singleton reads separately.  By default, given the input file \\fIFILE.bam\\fP, "
+            "the output paths \\fIFILE_1.fastq\\fP, \\fIFILE_2.fastq\\fP, \\fIFILE_S.fastq\\fP are "
+            "used.  The paired and singleton files are only created when there are any such reads.");
+    addText(parser,
+            "The parameters \\fB--out-name-sep\\fP, \\fB--interleaved\\fP and \\fB-z\\fP/\\fB--gzip-out\\fB "
+            "also influence the automatically generated out file names.  You can enforce the file names by "
+            "setting \\fB-oL\\fP/\\fB--out-file-left\\fP, \\fB-oR\\fP/\\fB--out-file-right\\fP, and "
+            "\\fB-oS\\fP/\\fB--out-file-single\\fP.");
+    
 
     // Add Author Section.
     addTextSection(parser, "Author");
@@ -204,8 +265,75 @@ parseCommandLine(Options & options, int argc, char const ** argv)
     getOptionValue(options.tileLength, parser, "tile-length");
     getOptionValue(options.maxTemplateLength, parser, "max-template-length");
 
+    options.interleavedOut = isSet(parser, "interleaved");
+    options.gzipOutput = isSet(parser, "gzip-output");
+    getOptionValue(options.outSep, parser, "out-name-sep");
+
     getOptionValue(options.inputPath, parser, "in-file");
-    getOptionValue(options.outputPath, parser, "out-file");
+
+    // Get out file basename from arguments or from --in-file.
+    seqan::CharString outFileBasename;
+    getOptionValue(outFileBasename, parser, "out-file");
+    if (empty(outFileBasename))
+    {
+        outFileBasename = options.inputPath;
+        // Find rightmost '.'.
+        for (unsigned i = 0; i < length(outFileBasename); ++i)
+        {
+            if (outFileBasename[length(outFileBasename) - i - 1] == '.')
+            {
+                resize(outFileBasename, length(outFileBasename) - i - 1);
+                break;
+            }
+        }
+    }
+
+    // Generate out file left/right/single paths if not set.
+    if (isSet(parser, "out-file-left"))
+    {
+        getOptionValue(options.outputPathLeft, parser, "out-file-left");
+    }
+    else
+    {
+        options.outputPathLeft = outFileBasename;
+        if (!options.interleavedOut)
+        {
+            append(options.outputPathLeft, options.outSep);
+            append(options.outputPathLeft, "1.fastq");
+        }
+        if (options.gzipOutput)
+            append(options.outputPathLeft, ".gz");
+    }
+    if (isSet(parser, "out-file-right"))
+    {
+        getOptionValue(options.outputPathRight, parser, "out-file-right");
+    }
+    else
+    {
+        options.outputPathRight = outFileBasename;
+        if (!options.interleavedOut)
+        {
+            append(options.outputPathRight, options.outSep);
+            append(options.outputPathRight, "2.fastq");
+        }
+        if (options.gzipOutput)
+            append(options.outputPathRight, ".gz");
+    }
+    if (isSet(parser, "out-file-single"))
+    {
+        getOptionValue(options.outputPathSingle, parser, "out-file-single");
+    }
+    else
+    {
+        options.outputPathSingle = outFileBasename;
+        if (!options.interleavedOut)
+        {
+            append(options.outputPathSingle, options.outSep);
+            append(options.outputPathSingle, "S.fastq");
+        }
+        if (options.gzipOutput)
+            append(options.outputPathSingle, ".gz");
+    }
 
     return seqan::ArgumentParser::PARSE_OK;
 }
@@ -345,26 +473,16 @@ int main(int argc, char const ** argv)
     startTime = sysTime();
     std::cerr << "Joining temporary FASTQ files ..." << std::flush;
     // Open output files.
-    unsigned dotPos = length(options.outputPath);  // Rightmost dot position.
-    for (unsigned i = length(options.outputPath) - 1; i > 0; --i)
-        if (options.outputPath[i] == '.')
-        {
-            dotPos = i;
-            break;
-        }
-    seqan::CharString pePath = options.outputPath;
-    seqan::CharString singletonPath = options.outputPath;
-    insert(singletonPath, dotPos, ".singletons");
-    seqan::SequenceStream peOut(toCString(pePath), seqan::SequenceStream::WRITE);
+    seqan::SequenceStream peOut(toCString(options.outputPathLeft), seqan::SequenceStream::WRITE);
     if (!isGood(peOut))
     {
-        std::cerr << "\nERROR: Could not open " << pePath << " for writing!\n";
+        std::cerr << "\nERROR: Could not open " << options.outputPathLeft << " for writing!\n";
         return 1;
     }
-    seqan::SequenceStream singletonOut(toCString(singletonPath), seqan::SequenceStream::WRITE);
+    seqan::SequenceStream singletonOut(toCString(options.outputPathSingle), seqan::SequenceStream::WRITE);
     if (!isGood(singletonOut))
     {
-        std::cerr << "\nERROR: Could not open " << singletonPath << " for writing!\n";
+        std::cerr << "\nERROR: Could not open " << options.outputPathSingle << " for writing!\n";
         return 1;
     }
     // Write out data.
