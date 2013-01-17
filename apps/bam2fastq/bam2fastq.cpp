@@ -352,7 +352,7 @@ parseCommandLine(Options & options, int argc, char const ** argv)
 // --------------------------------------------------------------------------
 
 // Process pile members of threads.
-int processPiles(SequenceSink & sink, seqan::String<ConverterThread> & threads)
+int processPiles(SequenceSink & sink, seqan::String<ConverterThread> & threads, Options const & /*options*/)
 {
     // Build mapping from left read name to (thread id, thread-local seq id).
     typedef std::map<seqan::CharString, std::pair<unsigned, unsigned> > TMap;
@@ -476,8 +476,9 @@ int main(int argc, char const ** argv)
     convOptions.verbosity = options.verbosity;
 
     // The SequenceSink allows thread-safe writing of blocks of FASTQ data.
-    SequenceSink sink(options.interleavedOut, options.gzipOutput, toCString(options.outputPathLeft),
-                      toCString(options.outputPathRight), toCString(options.outputPathSingle));
+    SequenceSink sink(options.interleavedOut, options.gzipOutput, options.numThreads,
+                      toCString(options.outputPathLeft), toCString(options.outputPathRight),
+                      toCString(options.outputPathSingle), options.verbosity);
 
     std::cerr << "Creating threads ..." << std::flush;
     seqan::String<ConverterThread> threads;
