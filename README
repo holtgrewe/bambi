@@ -88,22 +88,6 @@ The project is distributed as a SeqAn sandbox.  Here is how to build it:
   The file out.singletons.fq contains any unpaired from the input file.
 
 
-Frequently Asked Questions
---------------------------
-
-Q: The program freezes at some time and the CPU load is 0%.  The status in top
-   is "S" for suspended.
-
-A: The system has probably run out of disk space for temporary files.  Make
-   sure that the environment variable TMPDIR is set to a location where
-   there is sufficient disk space.
-
-   The program will try to create files in the directory ${TMPDIR} (the default
-   is /tmp).  On desktop systems, using /tmp is usually OK but on compute
-   servers, the location for large temporary files is usually configured to
-   be somewhere else by the system administrator.
-
-
 Detailed SeqAn Build and Prerequisites
 --------------------------------------
 
