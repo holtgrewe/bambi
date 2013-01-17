@@ -529,8 +529,10 @@ int main(int argc, char const ** argv)
     startTime = sysTime();
     std::cerr << "Remaining Conversion ... " << std::flush;
 
-    if (processPiles(sink, threads) != 0)
+    if (processPiles(sink, threads, options) != 0)
         return 1;
+    std::cerr << " OK\n";
+    std::cerr << "  Took " << (sysTime() - startTime) << " s\n";
 
     std::cerr << "\nDone converting BAM to FASTQ\n";
     // Sum up statistics on orphans.

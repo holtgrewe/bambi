@@ -87,12 +87,6 @@ public:
     // Verbosity level.
     int verbosity;
 
-    // The names of the left/right/single output files.
-    seqan::CharString pathLeft, pathRight, pathSingle;
-
-    // Whether or not we have already opened the sequence streams.
-    bool isOpenLeft, isOpenRight, isOpenSingle;
-
     // The OpenMP lock for thread safety.
     omp_lock_t _lock;
 

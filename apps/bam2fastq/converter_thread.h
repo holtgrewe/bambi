@@ -487,26 +487,32 @@ void ConverterThread::convertMapped(ConverterJob const & job)
             {
                 SEQAN_OMP_PRAGMA(critical (io))
                 {
-                    std::cerr << "MATE COULD NOT BE FOUND FOR:\n";
+                    std::cerr << "WARNING: Mate could not be found for:\n";
                     write2(std::cerr, record, bamStream.bamIOContext, seqan::Sam());
-                    std::cerr << "job.beginPos = " << job.beginPos << "\n"
-                              << "job.beginPos - mtl = " << job.beginPos - mtl << "\n"
-                              << "job.endPos = " << job.endPos << "\n";
+                    if (_options.verbosity >= 2)
+                    {
+                        std::cerr << "job.beginPos = " << job.beginPos << "\n"
+                                  << "job.beginPos - mtl = " << job.beginPos - mtl << "\n"
+                                  << "job.endPos = " << job.endPos << "\n";
+                    }
                 }
-                SEQAN_FAIL("Could not find mate for record but it must be there!");
+                //SEQAN_FAIL("Could not find mate for record but it must be there!");
             }
-            seqan::BamAlignmentRecord const & otherRecord = otherIt->second;
+            else
+            {
+                seqan::BamAlignmentRecord const & otherRecord = otherIt->second;
 
-            // Write out sequences into the result stream.
-            _stats.countPairedMapped(2);
-            buffer.insert(record);
-            buffer.insert(otherRecord);
-            
-            // Remove other entry from cache again.
-            unsigned oldSize = scannerCache._map.size();
-            erase(scannerCache, otherIt);
-            SEQAN_CHECK(scannerCache._map.size() + 1 == oldSize, "Must decrease size!");
-            SEQAN_CHECK(!containsMate(scannerCache, record), "Must not be there any more!");
+                // Write out sequences into the result stream.
+                _stats.countPairedMapped(2);
+                buffer.insert(record);
+                buffer.insert(otherRecord);
+
+                // Remove other entry from cache again.
+                unsigned oldSize = scannerCache._map.size();
+                erase(scannerCache, otherIt);
+                SEQAN_CHECK(scannerCache._map.size() + 1 == oldSize, "Must decrease size!");
+                SEQAN_CHECK(!containsMate(scannerCache, record), "Must not be there any more!");
+            }
         }
 
         // Read next record.
