@@ -316,6 +316,7 @@ public:
 
 void ConverterThread::convertMapped(ConverterJob const & job)
 {
+    double tileStart = sysTime();
     if (_state == START)
         _start();
 
@@ -387,6 +388,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
     }
 
     // Iterate over the BAM stream until we are right of the tile.
+    double writeTime = 0;
     while (true)  // We will break out before readRecord() on atEnd(bamStream).
     {
         // Write out chunk if it is over the size.
@@ -399,9 +401,11 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                     std::cerr << "thread " << omp_get_thread_num() << " BEGINS writing to sink.\n";
                 }
             }
+            double writeStart = sysTime();
             if (buffer.writeToSink(*_sink) != 0)
                 return;  // TOOD(holtgrew): Indicate failure.
             buffer.clear();
+            writeTime += sysTime() - writeStart;
             if (_options.verbosity >= 2)
             {
                 SEQAN_OMP_PRAGMA(critical (io))
@@ -538,6 +542,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
     }
     clear(scannerCache);
 
+    double writeStart = sysTime();
     if (_options.verbosity >= 2)
     {
         SEQAN_OMP_PRAGMA(critical (io))
@@ -548,11 +553,14 @@ void ConverterThread::convertMapped(ConverterJob const & job)
     if (buffer.writeToSink(*_sink) != 0)
         return;  // TOOD(holtgrew): Indicate failure.
     buffer.clear();
+    writeTime += sysTime() - writeStart;
     if (_options.verbosity >= 2)
     {
         SEQAN_OMP_PRAGMA(critical (io))
         {
             std::cerr << "thread " << omp_get_thread_num() << " STOPPED writing to sink.\n";
+            double now = sysTime();
+            fprintf(stderr, "THREAD %d PROCESSED TILE (%d, %d, %d).\tTOTAL: %f s\tWRITING: %f s\n", omp_get_thread_num(), job.rId, job.beginPos, job.endPos, now - tileStart, writeTime);
         }
     }
 

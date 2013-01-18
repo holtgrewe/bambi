@@ -210,6 +210,7 @@ public:
         }
 
         // Obtain lock and write out compressed data.
+        double lockStart = sysTime();
         {
             RaiiLock lockGuard(_lock);
             if (!empty(compressedBuffersS[tid]))
@@ -265,7 +266,13 @@ public:
                 // append(mmapRight, textBuffersR[tid]);
             }
         }
-        
+        if (verbosity >= 2)
+        {
+            SEQAN_OMP_PRAGMA(critical (io))
+            {
+                std::cerr << "THREAD " << omp_get_thread_num() << " HELD LOCK FOR " << sysTime() - lockStart << " s\n";
+            }
+        }
 
         // Clear buffers again.
         clear(textBuffersL[tid]);
