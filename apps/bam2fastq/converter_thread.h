@@ -34,6 +34,8 @@
 // Main work code for the BAM to FASTQ conversion.
 // ==========================================================================
 
+// TODO(holtgrew): Also write compressed block length into an extra field just like BGZF does this?
+
 #ifndef SANDBOX_BAMBI_APPS_BAM2FASTQ_CONVERTER_THREAD_H_
 #define SANDBOX_BAMBI_APPS_BAM2FASTQ_CONVERTER_THREAD_H_
 
