@@ -66,8 +66,9 @@ The project is distributed as a SeqAn sandbox.  Here is how to build it:
     release # samtools index Example.bam
 
   Then, we convert the example BAM file into a FASTQ file using four threads.
+  We use the -z parameter to compress the file.
 
-    release # ./bin/bam2fastq -i Example.bam -o out.fq -nt 4
+    release # ./bin/bam2fastq -i Example.bam -o out -nt 4 -z
 
   The last lines of the bam2fastq output to stdout should read:
 
@@ -79,14 +80,9 @@ The project is distributed as a SeqAn sandbox.  Here is how to build it:
                   singletons: 0
                   paired:     1974244
 
-  We now have two files out.fq and out.singleton.fq.
-
-  The file out.fq contain the paired reads interleaved order, e.g. (first
-  read of pair A, second read of pair A, first read of pair B, second red of
-  pair B).  Note that the order is not the same as in the original input.
-
-  The file out.singletons.fq contains any unpaired from the input file.
-
+  We now have two files out_1.fastq.gz out_2.fastq.gz.  If we had any
+  single reads then we would have a file called out_S.fastq.gz.  The resulting
+  files are only created if there are any such reads.
 
 Detailed SeqAn Build and Prerequisites
 --------------------------------------
