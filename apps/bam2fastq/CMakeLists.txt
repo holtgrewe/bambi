@@ -18,6 +18,14 @@ message (STATUS "Configuring sandbox/bambi/apps/bam2fastq")
 set (SEQAN_FIND_DEPENDENCIES ZLIB OpenMP)
 find_package (SeqAn REQUIRED)
 
+# Enable C++0x standard.  This flag is forward compatible with g++ versions from 4.7.
+#
+# See also http://gcc.gnu.org/projects/cxx0x.html
+#          http://stackoverflow.com/questions/8938805/cmake-clang-and-c0x
+if (CMAKE_COMPILER_IS_GNUCXX OR COMPILER_IS_CLANG)
+  add_definitions ("-std=c++0x")
+endif (CMAKE_COMPILER_IS_GNUCXX OR COMPILER_IS_CLANG)
+
 # ----------------------------------------------------------------------------
 # Build Setup
 # ----------------------------------------------------------------------------
