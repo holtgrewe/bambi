@@ -32,14 +32,11 @@ The project is distributed as a SeqAn sandbox.  Here is how to build it:
     seqan-trunk # git clone git://github.com/holtgrewe/bambi.git
     seqan-trunk # cd ../..
 
-  (3) Build the bam2fastq program.  Note that depending on the GCC version
-      you are using, you have to use -std=c++0x (older versions) or
-      -std=c++11 (newer version, e.g. g++-4.7).  Consult "man g++" for
-      the exact flag value to use.
+  (3) Build the bam2fastq program.
 
     Development # mkdir -p seqan-trunk-build/release
     Development # cd seqan-trunk-build/release
-    release # CXX_FLAGS=-std=c++0x cmake ../../seqan-trunk
+    release # cmake ../../seqan-trunk
     release # make bam2fastq
 
   (4) You are now read to use bam2fastq. Let us look at the help first.
