@@ -316,6 +316,17 @@ public:
 // Function ConverterThread::convertMapped()
 // ----------------------------------------------------------------------------
 
+void fixNextInfo(seqan::BamAlignmentRecord & record)
+{
+    // Fix record in case it is aligned but the next is not and the rNextId/pNext fields are not set properly.  The
+    // SAM standard does not clearly state that these fields should be set.
+    if (!hasFlagUnmapped(record) && hasFlagNextUnmapped(record))
+    {
+        record.rNextId = record.rId;
+            record.pNext = record.pos;
+    }
+}
+
 void ConverterThread::convertMapped(ConverterJob const & job)
 {
     double tileStart = sysTime();
@@ -344,6 +355,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
         // Read record.
         if (readRecord(record, bamStream) != 0)
             return;  // TODO(holtgrew): Indicate error.
+        fixNextInfo(record);
 
         // Skip record if not necessary.
         if ((unsigned)record.rId > (unsigned)job.rId || (record.rId == job.rId && record.pos >= job.endPos))
@@ -439,6 +451,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                 break;  // Stop if there are no more records.
             if (readRecord(record, bamStream) != 0)
                 return;  // TODO(holtgrew): Indicate error.
+            fixNextInfo(record);
             continue;
         }
 
@@ -453,6 +466,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                 break;  // Stop if there are no more records.
             if (readRecord(record, bamStream) != 0)
                 return;  // TODO(holtgrew): Indicate error.
+            fixNextInfo(record);
             continue;
         }
 
@@ -467,6 +481,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                 break;  // Stop if there are no more records.
             if (readRecord(record, bamStream) != 0)
                 return;  // TODO(holtgrew): Indicate error.
+            fixNextInfo(record);
             continue;
         }
 
@@ -484,6 +499,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
                 break;  // Stop if there are no more records.
             if (readRecord(record, bamStream) != 0)
                 return;  // TODO(holtgrew): Indicate error.
+            fixNextInfo(record);
             continue;
         }
         else
@@ -527,6 +543,7 @@ void ConverterThread::convertMapped(ConverterJob const & job)
             break;  // Stop if there are no more records.
         if (readRecord(record, bamStream) != 0)
             return;  // TODO(holtgrew): Indicate error.
+        fixNextInfo(record);
     }
 
     if (!empty(scannerCache))
